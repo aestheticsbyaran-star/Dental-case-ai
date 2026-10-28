@@ -1,0 +1,333 @@
+// Local server: stores cases on this computer and calls the Claude API for analyses.
+import "dotenv/config";
+import path from "node:path";
+import { promises as fs } from "node:fs";
+import { randomUUID } from "node:crypto";
+import express, { type NextFunction, type Request, type Response } from "express";
+import multer from "multer";
+import Anthropic from "@anthropic-ai/sdk";
+import type { Analysis, CaseDetails, CaseRecord, Measurement, RecordKind, ReviewVerdict } from "../shared/types.js";
+import {
+  NotFoundError,
+  createCase,
+  deleteCase,
+  filePath,
+  filesDir,
+  getCase,
+  listCases,
+  withCase,
+  DATA_DIR,
+} from "./store.js";
+import { MODEL, runAnalysis } from "./analyse.js";
+
+const PORT = Number(process.env.PORT ?? 8787);
+const app = express();
+app.use(express.json({ limit: "2mb" }));
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  // CBCT series can be large; single 2D files and STLs are well under this.
+  limits: { fileSize: 600 * 1024 * 1024, files: 12 },
+});
+
+const RECORD_KINDS: RecordKind[] = ["photo", "radiograph", "dicom", "scan", "document"];
+const VERDICTS: ReviewVerdict[] = ["pending", "agreed", "partly-agreed", "disagreed"];
+
+function extOf(name: string): string {
+  const ext = path.extname(name).toLowerCase().replace(/[^.a-z0-9]/g, "");
+  return ext.length > 1 && ext.length <= 9 ? ext : "";
+}
+
+async function writeUpload(caseId: string, file: Express.Multer.File, forceExt?: string): Promise<string> {
+  const stored = `${randomUUID()}${forceExt ?? extOf(file.originalname)}`;
+  await fs.mkdir(filesDir(caseId), { recursive: true });
+  await fs.writeFile(filePath(caseId, stored), file.buffer);
+  return stored;
+}
+
+const wrap =
+  (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) =>
+    fn(req, res).catch(next);
+
+const param = (req: Request, name: string): string => String(req.params[name]);
+
+app.get("/api/status", (_req, res) => {
+  res.json({ apiKeyConfigured: Boolean(process.env.ANTHROPIC_API_KEY), model: MODEL, dataDir: DATA_DIR });
+});
+
+app.get(
+  "/api/cases",
+  wrap(async (_req, res) => {
+    const cases = await listCases();
+    res.json(
+      cases.map((c) => ({
+        id: c.id,
+        reference: c.details.reference,
+        chiefComplaint: c.details.chiefComplaint,
+        updatedAt: c.updatedAt,
+        recordCount: c.records.length,
+        analysisCount: c.analyses.length,
+      })),
+    );
+  }),
+);
+
+app.post(
+  "/api/cases",
+  wrap(async (req, res) => {
+    const reference = String(req.body?.reference ?? "").slice(0, 80);
+    res.status(201).json(await createCase(reference));
+  }),
+);
+
+app.get("/api/cases/:id", wrap(async (req, res) => res.json(await getCase(param(req, "id")))));
+
+app.delete(
+  "/api/cases/:id",
+  wrap(async (req, res) => {
+    await getCase(param(req, "id"));
+    await deleteCase(param(req, "id"));
+    res.status(204).end();
+  }),
+);
+
+const DETAIL_FIELDS: (keyof CaseDetails)[] = [
+  "reference",
+  "chiefComplaint",
+  "medicalHistory",
+  "dentalHistory",
+  "examination",
+  "patientGoals",
+  "notes",
+];
+
+app.put(
+  "/api/cases/:id/details",
+  wrap(async (req, res) => {
+    const body = req.body ?? {};
+    const updated = await withCase(param(req, "id"), (c) => {
+      for (const f of DETAIL_FIELDS) if (typeof body[f] === "string") (c.details[f] as string) = body[f];
+      if (body.age === null || (typeof body.age === "number" && body.age >= 0 && body.age < 130)) c.details.age = body.age;
+      if (["female", "male", "other", "not-recorded"].includes(body.sex)) c.details.sex = body.sex;
+      return c;
+    });
+    res.json(updated);
+  }),
+);
+
+// Upload one record: the original file plus browser-generated previews (de-identified images for AI).
+app.post(
+  "/api/cases/:id/records",
+  upload.fields([
+    { name: "file", maxCount: 1 },
+    { name: "previews", maxCount: 8 },
+  ]),
+  wrap(async (req, res) => {
+    const caseId = param(req, "id");
+    await getCase(caseId);
+    const files = req.files as Record<string, Express.Multer.File[]> | undefined;
+    const file = files?.file?.[0];
+    if (!file) return res.status(400).json({ error: "No file was uploaded." });
+    const meta = JSON.parse(String(req.body.meta ?? "{}"));
+    const kind: RecordKind = RECORD_KINDS.includes(meta.kind) ? meta.kind : "document";
+
+    const storedName = await writeUpload(caseId, file);
+    const previews: string[] = [];
+    for (const p of files?.previews ?? []) {
+      const ext = p.mimetype === "image/png" ? ".png" : ".jpg";
+      previews.push(await writeUpload(caseId, p, ext));
+    }
+
+    const record: CaseRecord = {
+      id: randomUUID(),
+      kind,
+      originalName: file.originalname.slice(0, 200),
+      storedName,
+      mimeType: file.mimetype,
+      size: file.size,
+      uploadedAt: new Date().toISOString(),
+      view: meta.view,
+      caption: String(meta.caption ?? "").slice(0, 200),
+      mmPerPixel: typeof meta.mmPerPixel === "number" && meta.mmPerPixel > 0 ? meta.mmPerPixel : undefined,
+      calibrationSource: typeof meta.mmPerPixel === "number" && meta.mmPerPixel > 0 ? "dicom" : undefined,
+      previews,
+      includeInAnalysis: previews.length > 0,
+      measurements: [],
+    };
+    await withCase(caseId, (c) => {
+      c.records.push(record);
+    });
+    res.status(201).json(record);
+  }),
+);
+
+app.patch(
+  "/api/cases/:id/records/:recordId",
+  wrap(async (req, res) => {
+    const body = req.body ?? {};
+    const record = await withCase(param(req, "id"), (c) => {
+      const r = c.records.find((x) => x.id === param(req, "recordId"));
+      if (!r) throw new NotFoundError("Record not found");
+      if (typeof body.caption === "string") r.caption = body.caption.slice(0, 200);
+      if (typeof body.view === "string") r.view = body.view;
+      if (typeof body.includeInAnalysis === "boolean") r.includeInAnalysis = body.includeInAnalysis;
+      if (body.mmPerPixel === null) {
+        r.mmPerPixel = undefined;
+        r.calibrationSource = undefined;
+      } else if (typeof body.mmPerPixel === "number" && body.mmPerPixel > 0) {
+        r.mmPerPixel = body.mmPerPixel;
+        r.calibrationSource = "manual";
+      }
+      if (Array.isArray(body.measurements)) {
+        r.measurements = (body.measurements as Measurement[])
+          .filter((m) => (m.type === "distance" || m.type === "angle") && Number.isFinite(m.value))
+          .map((m) => ({
+            id: typeof m.id === "string" ? m.id : randomUUID(),
+            type: m.type,
+            value: m.value,
+            calibrated: Boolean(m.calibrated),
+            label: String(m.label ?? "").slice(0, 120),
+            tooth: m.tooth ? String(m.tooth).slice(0, 20) : undefined,
+            points: Array.isArray(m.points) ? m.points : [],
+            createdAt: typeof m.createdAt === "string" ? m.createdAt : new Date().toISOString(),
+          }));
+      }
+      return r;
+    });
+    res.json(record);
+  }),
+);
+
+app.delete(
+  "/api/cases/:id/records/:recordId",
+  wrap(async (req, res) => {
+    const caseId = param(req, "id");
+    const removed = await withCase(caseId, (c) => {
+      const i = c.records.findIndex((x) => x.id === param(req, "recordId"));
+      if (i < 0) throw new NotFoundError("Record not found");
+      return c.records.splice(i, 1)[0];
+    });
+    for (const name of [removed.storedName, ...removed.previews]) {
+      await fs.rm(filePath(caseId, name), { force: true });
+    }
+    res.status(204).end();
+  }),
+);
+
+app.get(
+  "/api/cases/:id/files/:name",
+  wrap(async (req, res) => {
+    const p = filePath(param(req, "id"), param(req, "name"));
+    res.sendFile(p, { headers: { "Cache-Control": "private, max-age=3600" } }, (err) => {
+      if (err && !res.headersSent) res.status(404).json({ error: "File not found" });
+    });
+  }),
+);
+
+app.post(
+  "/api/cases/:id/analyses",
+  wrap(async (req, res) => {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(400).json({ error: "No Claude API key is set. Add ANTHROPIC_API_KEY to the .env file and restart." });
+    }
+    const caseId = param(req, "id");
+    const c = await getCase(caseId);
+    const question = String(req.body?.question ?? "").slice(0, 4000);
+    const records = c.records.filter((r) => r.includeInAnalysis);
+
+    const analysis: Analysis = {
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      model: MODEL,
+      question,
+      inputSummary: {
+        recordIds: records.map((r) => r.id),
+        imageCount: 0,
+        measurementCount: records.reduce((n, r) => n + r.measurements.length, 0),
+      },
+      status: "complete",
+      review: { verdict: "pending", finalPlan: "", comments: "" },
+    };
+    try {
+      const result = await runAnalysis(new Anthropic(), c, records, question);
+      analysis.output = result.output;
+      analysis.usage = result.usage;
+      analysis.inputSummary.imageCount = result.imageCount;
+    } catch (err) {
+      analysis.status = "failed";
+      analysis.error = err instanceof Anthropic.APIError ? `Claude API error ${err.status ?? ""}: ${err.message}` : String((err as Error).message ?? err);
+      console.error("Analysis failed:", err);
+    }
+    await withCase(caseId, (fresh) => {
+      fresh.analyses.unshift(analysis);
+    });
+    res.status(analysis.status === "complete" ? 201 : 502).json(analysis);
+  }),
+);
+
+app.put(
+  "/api/cases/:id/analyses/:analysisId/review",
+  wrap(async (req, res) => {
+    const body = req.body ?? {};
+    const analysis = await withCase(param(req, "id"), (c) => {
+      const a = c.analyses.find((x) => x.id === param(req, "analysisId"));
+      if (!a) throw new NotFoundError("Analysis not found");
+      a.review = {
+        verdict: VERDICTS.includes(body.verdict) ? body.verdict : a.review.verdict,
+        finalPlan: typeof body.finalPlan === "string" ? body.finalPlan : a.review.finalPlan,
+        comments: typeof body.comments === "string" ? body.comments : a.review.comments,
+        reviewedAt: new Date().toISOString(),
+      };
+      return a;
+    });
+    res.json(analysis);
+  }),
+);
+
+// Export the review log across all cases as CSV, for tracking how often the AI matched your plan.
+app.get(
+  "/api/review-log.csv",
+  wrap(async (_req, res) => {
+    const cases = await listCases();
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const rows = [["case_reference", "analysis_date", "model", "status", "verdict", "options_suggested", "final_plan", "comments"].join(",")];
+    for (const c of cases) {
+      for (const a of c.analyses) {
+        rows.push(
+          [
+            c.details.reference,
+            a.createdAt,
+            a.model,
+            a.status,
+            a.review.verdict,
+            (a.output?.treatmentOptions ?? []).map((o) => o.title).join(" | "),
+            a.review.finalPlan,
+            a.review.comments,
+          ]
+            .map(esc)
+            .join(","),
+        );
+      }
+    }
+    res.type("text/csv").attachment("review-log.csv").send(rows.join("\n"));
+  }),
+);
+
+if (process.env.NODE_ENV === "production") {
+  const dist = path.resolve("dist");
+  app.use(express.static(dist));
+  app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(path.join(dist, "index.html")));
+}
+
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof NotFoundError) return res.status(404).json({ error: err.message });
+  if (err instanceof multer.MulterError) return res.status(400).json({ error: err.message });
+  console.error(err);
+  res.status(500).json({ error: "Something went wrong on the local server. Check the terminal for details." });
+});
+
+// Listen on this computer only.
+app.listen(PORT, "127.0.0.1", () => {
+  console.log(`Case server on http://127.0.0.1:${PORT} (data in ${DATA_DIR})`);
+  if (!process.env.ANTHROPIC_API_KEY) console.log("Note: ANTHROPIC_API_KEY is not set, so AI analysis is disabled.");
+});
