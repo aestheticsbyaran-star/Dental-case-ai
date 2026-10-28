@@ -1,6 +1,6 @@
 // Types shared by the local server and the web app.
 
-export type RecordKind = "photo" | "radiograph" | "dicom" | "scan" | "document";
+export type RecordKind = "photo" | "radiograph" | "dicom" | "cbct" | "scan" | "document";
 
 export type RadiographView =
   | "bitewing"
@@ -20,8 +20,10 @@ export interface Measurement {
   label: string;
   /** FDI tooth number(s) the measurement relates to, e.g. "36" or "35-37". */
   tooth?: string;
-  /** Points in image pixels (2D) or model mm (3D), for redrawing. */
+  /** Points in image pixels (2D) or mm (scans and CBCT), for redrawing. */
   points: number[][];
+  /** CBCT only: the view the measurement was made on. */
+  plane?: "axial" | "coronal" | "sagittal";
   createdAt: string;
 }
 
@@ -41,9 +43,21 @@ export interface CaseRecord {
   calibrationSource?: "dicom" | "manual";
   /** De-identified PNG/JPEG previews generated in the browser, used for AI analysis. */
   previews: string[];
+  /** What each preview shows, e.g. "Axial slice 212 of 400", in the same order as previews. */
+  previewLabels?: string[];
+  /** For CBCT: size and voxel spacing of the stored volume. */
+  volume?: VolumeInfo;
   /** Include this record when asking Claude for an analysis. */
   includeInAnalysis: boolean;
   measurements: Measurement[];
+}
+
+export interface VolumeInfo {
+  dims: [number, number, number];
+  /** Voxel size in mm along x, y, z. */
+  spacing: [number, number, number];
+  sliceCount: number;
+  notes: string[];
 }
 
 export type Sex = "female" | "male" | "other" | "not-recorded";
