@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 import multer from "multer";
 import Anthropic from "@anthropic-ai/sdk";
-import type { Analysis, CaseDetails, CaseRecord, Measurement, RecordKind, ReviewVerdict } from "../shared/types.js";
+import type { Analysis, CaseDetails, CaseRecord, Measurement, RecordKind, ReviewVerdict, VolumeInfo } from "../shared/types.js";
 import {
   NotFoundError,
   createCase,
@@ -30,7 +30,7 @@ const upload = multer({
   limits: { fileSize: 600 * 1024 * 1024, files: 12 },
 });
 
-const RECORD_KINDS: RecordKind[] = ["photo", "radiograph", "dicom", "scan", "document"];
+const RECORD_KINDS: RecordKind[] = ["photo", "radiograph", "dicom", "cbct", "scan", "document"];
 const VERDICTS: ReviewVerdict[] = ["pending", "agreed", "partly-agreed", "disagreed"];
 
 function extOf(name: string): string {
@@ -43,6 +43,18 @@ async function writeUpload(caseId: string, file: Express.Multer.File, forceExt?:
   await fs.mkdir(filesDir(caseId), { recursive: true });
   await fs.writeFile(filePath(caseId, stored), file.buffer);
   return stored;
+}
+
+function parseVolumeInfo(v: unknown): VolumeInfo | undefined {
+  const o = v as Partial<VolumeInfo> | undefined;
+  const triple = (a: unknown) => Array.isArray(a) && a.length === 3 && a.every((n) => typeof n === "number" && n > 0);
+  if (!o || !triple(o.dims) || !triple(o.spacing)) return undefined;
+  return {
+    dims: o.dims as VolumeInfo["dims"],
+    spacing: o.spacing as VolumeInfo["spacing"],
+    sliceCount: Number(o.sliceCount) || 0,
+    notes: Array.isArray(o.notes) ? o.notes.map((n) => String(n).slice(0, 300)).slice(0, 10) : [],
+  };
 }
 
 const wrap =
@@ -138,6 +150,7 @@ app.post(
       previews.push(await writeUpload(caseId, p, ext));
     }
 
+    const labels: unknown[] = Array.isArray(meta.previewLabels) ? meta.previewLabels : [];
     const record: CaseRecord = {
       id: randomUUID(),
       kind,
@@ -151,6 +164,8 @@ app.post(
       mmPerPixel: typeof meta.mmPerPixel === "number" && meta.mmPerPixel > 0 ? meta.mmPerPixel : undefined,
       calibrationSource: typeof meta.mmPerPixel === "number" && meta.mmPerPixel > 0 ? "dicom" : undefined,
       previews,
+      previewLabels: previews.map((_, i) => String(labels[i] ?? "").slice(0, 200)),
+      volume: kind === "cbct" ? parseVolumeInfo(meta.volume) : undefined,
       includeInAnalysis: previews.length > 0,
       measurements: [],
     };
@@ -189,11 +204,53 @@ app.patch(
             label: String(m.label ?? "").slice(0, 120),
             tooth: m.tooth ? String(m.tooth).slice(0, 20) : undefined,
             points: Array.isArray(m.points) ? m.points : [],
+            plane: ["axial", "coronal", "sagittal"].includes(m.plane as string) ? m.plane : undefined,
             createdAt: typeof m.createdAt === "string" ? m.createdAt : new Date().toISOString(),
           }));
       }
       return r;
     });
+    res.json(record);
+  }),
+);
+
+// Add an extra view (e.g. a CBCT slice the dentist chose) to the images sent for analysis.
+app.post(
+  "/api/cases/:id/records/:recordId/previews",
+  upload.single("preview"),
+  wrap(async (req, res) => {
+    const caseId = param(req, "id");
+    if (!req.file) return res.status(400).json({ error: "No image was uploaded." });
+    if (!["image/jpeg", "image/png"].includes(req.file.mimetype)) return res.status(400).json({ error: "Views must be JPEG or PNG." });
+    await getCase(caseId);
+    const stored = await writeUpload(caseId, req.file, req.file.mimetype === "image/png" ? ".png" : ".jpg");
+    const record = await withCase(caseId, (c) => {
+      const r = c.records.find((x) => x.id === param(req, "recordId"));
+      if (!r) throw new NotFoundError("Record not found");
+      r.previewLabels = r.previews.map((_, i) => r.previewLabels?.[i] ?? "");
+      r.previews.push(stored);
+      r.previewLabels.push(String(req.body.label ?? "").slice(0, 200));
+      r.includeInAnalysis = true;
+      return r;
+    });
+    res.status(201).json(record);
+  }),
+);
+
+app.delete(
+  "/api/cases/:id/records/:recordId/previews/:name",
+  wrap(async (req, res) => {
+    const caseId = param(req, "id");
+    const name = param(req, "name");
+    const record = await withCase(caseId, (c) => {
+      const r = c.records.find((x) => x.id === param(req, "recordId"));
+      const i = r?.previews.indexOf(name) ?? -1;
+      if (!r || i < 0) throw new NotFoundError("View not found");
+      r.previews.splice(i, 1);
+      r.previewLabels?.splice(i, 1);
+      return r;
+    });
+    await fs.rm(filePath(caseId, name), { force: true });
     res.json(record);
   }),
 );

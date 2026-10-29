@@ -48,6 +48,7 @@ How to treat the inputs:
 - Anything you see in the images yourself is basis "visual-impression". Do not give millimetre or degree values from your own reading of an image; describe it qualitatively and say what should be measured or checked. Radiographic impressions in particular need the dentist's confirmation, so keep confidence honest (usually "low" or "medium").
 - Uncalibrated measurements are in image pixels and only useful as ratios; do not convert them to mm.
 - Intraoral scan images are renders of the 3D model from fixed angles; colour is not tooth shade.
+- CBCT images are single slices or maximum intensity projections (MIPs) cut from the volume, labelled with the view. A MIP superimposes everything along its direction, so use it for overview only. Views the dentist added by hand may show their measurement lines drawn on.
 - If records conflict (e.g. notes say a tooth is present but the radiograph suggests otherwise), say so in risksAndFlags.
 
 What to produce:
@@ -82,7 +83,9 @@ export function buildCaseText(c: Case, records: CaseRecord[], question: string):
     const calib =
       r.kind === "scan"
         ? "3D model in mm"
-        : r.mmPerPixel
+        : r.kind === "cbct" && r.volume
+          ? `CBCT volume ${r.volume.dims.join(" x ")} voxels, voxel size ${r.volume.spacing.map((s) => s.toFixed(3)).join(" x ")} mm`
+          : r.mmPerPixel
           ? `calibrated, ${r.mmPerPixel.toFixed(4)} mm/pixel from ${r.calibrationSource}`
           : "not calibrated";
     lines.push(`${i + 1}. [${r.kind}${view}] "${r.caption || r.originalName}" - ${r.previews.length} image(s), ${calib}`);
@@ -94,7 +97,8 @@ export function buildCaseText(c: Case, records: CaseRecord[], question: string):
   for (const { r, m } of measured) {
     const unit = m.type === "angle" ? "°" : m.calibrated ? " mm" : " px (uncalibrated)";
     const tooth = m.tooth ? ` [tooth ${m.tooth}]` : "";
-    lines.push(`- ${m.label || m.type}${tooth}: ${m.value.toFixed(m.type === "angle" ? 1 : 2)}${unit} (on "${r.caption || r.originalName}")`);
+    const where = m.plane ? `, ${m.plane} view` : "";
+    lines.push(`- ${m.label || m.type}${tooth}: ${m.value.toFixed(m.type === "angle" ? 1 : 2)}${unit} (on "${r.caption || r.originalName}"${where})`);
   }
 
   lines.push("", `Question from the dentist: ${question || "Please analyse this case and outline treatment options."}`);
@@ -113,10 +117,11 @@ export async function buildMessageContent(
   const content: Anthropic.ContentBlockParam[] = [];
   let imageCount = 0;
   for (const r of records) {
-    for (const preview of r.previews) {
+    for (const [i, preview] of r.previews.entries()) {
       if (imageCount >= MAX_IMAGES) break;
       const data = await fs.readFile(filePath(c.id, preview));
-      content.push({ type: "text", text: `Image from "${r.caption || r.originalName}" (${r.kind}${r.view ? `, ${r.view}` : ""}):` });
+      const label = r.previewLabels?.[i] ? ` - ${r.previewLabels[i]}` : "";
+      content.push({ type: "text", text: `Image from "${r.caption || r.originalName}" (${r.kind}${r.view ? `, ${r.view}` : ""})${label}:` });
       content.push({ type: "image", source: { type: "base64", media_type: mediaType(preview), data: data.toString("base64") } });
       imageCount++;
     }

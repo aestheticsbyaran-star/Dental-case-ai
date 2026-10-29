@@ -1,4 +1,4 @@
-import type { Analysis, AnalysisReview, Case, CaseDetails, CaseRecord, Measurement, RadiographView, RecordKind } from "../../../shared/types";
+import type { Analysis, AnalysisReview, Case, CaseDetails, CaseRecord, Measurement, RadiographView, RecordKind, VolumeInfo } from "../../../shared/types";
 
 export interface CaseSummary {
   id: string;
@@ -43,7 +43,14 @@ export const api = {
     caseId: string,
     file: File,
     previews: Blob[],
-    meta: { kind: RecordKind; caption: string; view?: RadiographView; mmPerPixel?: number },
+    meta: {
+      kind: RecordKind;
+      caption: string;
+      view?: RadiographView;
+      mmPerPixel?: number;
+      previewLabels?: string[];
+      volume?: VolumeInfo;
+    },
   ) => {
     const form = new FormData();
     form.append("file", file, file.name);
@@ -58,6 +65,14 @@ export const api = {
   ) => request<CaseRecord>(`/api/cases/${caseId}/records/${recordId}`, json("PATCH", patch)),
   deleteRecord: (caseId: string, recordId: string) =>
     request<void>(`/api/cases/${caseId}/records/${recordId}`, { method: "DELETE" }),
+  addPreview: (caseId: string, recordId: string, image: Blob, label: string) => {
+    const form = new FormData();
+    form.append("preview", image, "view.jpg");
+    form.append("label", label);
+    return request<CaseRecord>(`/api/cases/${caseId}/records/${recordId}/previews`, { method: "POST", body: form });
+  },
+  deletePreview: (caseId: string, recordId: string, name: string) =>
+    request<CaseRecord>(`/api/cases/${caseId}/records/${recordId}/previews/${name}`, { method: "DELETE" }),
   fileUrl: (caseId: string, storedName: string) => `/api/cases/${caseId}/files/${storedName}`,
 
   analyse: (caseId: string, question: string) => request<Analysis>(`/api/cases/${caseId}/analyses`, json("POST", { question })),
