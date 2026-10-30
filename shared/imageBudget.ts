@@ -2,8 +2,8 @@
 // Used by the server to build the request and by the web app to say what will be sent.
 import type { CaseRecord } from "./types";
 
-/** Images per analysis. The API takes up to 100; this keeps requests a sensible size. */
-export const MAX_IMAGES = 40;
+/** Images per analysis. The API takes up to 600; this keeps the cost of one analysis to about £1.50 at most. */
+export const MAX_IMAGES = 100;
 
 /** The first five CBCT previews are the automatic overviews; later ones were added by hand. */
 export const CBCT_OVERVIEW_COUNT = 5;
