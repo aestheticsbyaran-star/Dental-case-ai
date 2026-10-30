@@ -9,8 +9,8 @@ import type { AnalysisOutput, Case, CaseRecord } from "../shared/types.js";
 import { filePath } from "./store.js";
 
 export const MODEL = "claude-opus-5-5";
-/** Claude scales images down to about this long edge anyway; above 20 images the API rejects any over 2000 px. */
-const AI_MAX_EDGE = 1568;
+/** Claude Opus 5.5 reads images up to 2576 px on the long edge; above 20 images the API rejects any over 3000 px. */
+const AI_MAX_EDGE = 2576;
 
 const AnalysisSchema = z.object({
   caseSummary: z.string(),
