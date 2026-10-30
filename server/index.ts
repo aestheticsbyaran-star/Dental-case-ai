@@ -48,7 +48,7 @@ const upload = multer({
 
 const RECORD_KINDS: RecordKind[] = ["photo", "radiograph", "dicom", "cbct", "scan", "document"];
 const VERDICTS: ReviewVerdict[] = ["pending", "agreed", "partly-agreed", "disagreed"];
-const DOCUMENT_KINDS: DocumentKind[] = ["letter", "records", "guide", "presentation"];
+const DOCUMENT_KINDS: DocumentKind[] = ["letter", "records", "guide", "presentation", "consent"];
 const BRAND_TEXT_FIELDS: (keyof BrandSettings)[] = [
   "displayName",
   "qualifications",
@@ -424,7 +424,7 @@ app.put(
   }),
 );
 
-// Write a letter, records note, guide or presentation from an analysis.
+// Write a letter, records note, guide, presentation or consent form from an analysis.
 app.post(
   "/api/cases/:id/documents",
   wrap(async (req, res) => {

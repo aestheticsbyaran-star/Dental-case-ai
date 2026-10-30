@@ -83,6 +83,16 @@ describe("patient documents", () => {
     expect(prompt).toContain("clinical records note");
   });
 
+  it("asks consent forms for material risks and leaves the declarations to the template", () => {
+    const prompt = documentSystemPrompt("consent", defaultBrand());
+    expect(prompt).toContain("material risk");
+    expect(prompt).toContain("Do not include no treatment here");
+    expect(prompt).toContain("so do not write those");
+    const ok = { title: "t", treatment: "x", teeth: "36", benefits: [], risks: [{ risk: "Infection", detail: "uncommon" }], alternatives: [], noTreatment: "", aftercare: [], cost: "[fee]" };
+    expect(DOCUMENT_SCHEMAS.consent.safeParse(ok).success).toBe(true);
+    expect(DOCUMENT_SCHEMAS.consent.safeParse({ ...ok, risks: ["Infection"] }).success).toBe(false);
+  });
+
   it("rejects edited content of the wrong shape", () => {
     expect(DOCUMENT_SCHEMAS.letter.safeParse({ subject: "x", paragraphs: ["a"] }).success).toBe(true);
     expect(DOCUMENT_SCHEMAS.presentation.safeParse({ title: "x", slides: [{ title: "t" }] }).success).toBe(false);

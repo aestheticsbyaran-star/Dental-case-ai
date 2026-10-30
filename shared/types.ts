@@ -182,7 +182,7 @@ export interface Analysis {
   review: AnalysisReview;
 }
 
-export type DocumentKind = "letter" | "records" | "guide" | "presentation";
+export type DocumentKind = "letter" | "records" | "guide" | "presentation" | "consent";
 
 export interface LetterContent {
   subject: string;
@@ -221,11 +221,37 @@ export interface PresentationContent {
   slides: Slide[];
 }
 
+export interface ConsentRisk {
+  risk: string;
+  detail: string;
+}
+
+export interface ConsentAlternative {
+  option: string;
+  summary: string;
+}
+
+/** A treatment-specific consent form. The standard declarations and signature boxes come from the template. */
+export interface ConsentContent {
+  title: string;
+  /** What the proposed treatment involves, in plain language. */
+  treatment: string;
+  teeth: string;
+  benefits: string[];
+  risks: ConsentRisk[];
+  alternatives: ConsentAlternative[];
+  /** Likely consequences of having no treatment. */
+  noTreatment: string;
+  aftercare: string[];
+  cost: string;
+}
+
 export interface DocumentContentMap {
   letter: LetterContent;
   records: RecordsContent;
   guide: GuideContent;
   presentation: PresentationContent;
+  consent: ConsentContent;
 }
 
 /** A preview image a presentation can show: the record and which of its previews. */

@@ -244,3 +244,17 @@ button.slide-thumb:hover .slide { outline: 2px solid var(--accent); }
 .assessments { display: grid; gap: 10px; margin: 0; }
 .assessments dt { font-weight: 600; }
 .assessments dd { margin: 2px 0 0; }
+
+/* Consent form */
+.consent-title { font-size: 17pt; }
+.consent-fields { display: flex; flex-wrap: wrap; gap: 8px 28px; font-size: 10.5pt; }
+.consent-fields > span { display: flex; align-items: flex-end; gap: 6px; }
+.paper .fill { display: inline-block; min-width: 55mm; border-bottom: 1px solid #8a939c; min-height: 1.3em; }
+.consent .guide-section ul { display: flex; flex-direction: column; gap: 3px; }
+.consent-sign { break-inside: avoid; margin-top: 6px; border-top: 1px solid #dde2e6; padding-top: 6px; }
+ul.ticks { list-style: none; padding-left: 0 !important; }
+ul.ticks li { position: relative; padding-left: 7mm; }
+ul.ticks li::before { content: ""; position: absolute; left: 0; top: 0.25em; width: 3.4mm; height: 3.4mm; border: 1px solid #5b6570; }
+.sign-grid { display: grid; grid-template-columns: auto 1fr auto 38mm; gap: 7mm 10px; align-items: end; margin-top: 6mm; font-size: 10pt; }
+.sign-grid .fill { min-width: 0; }
+.small-print { font-size: 9.5pt; color: #3b444d; margin-top: 6mm !important; }

@@ -44,6 +44,7 @@ Case files are saved in `./data` (change it with `DATA_DIR` in `.env`). Back tha
    - a **treatment plan letter** on your letterhead (type the patient's name when printing; it is never saved)
    - a **records note** to paste into your practice software
    - a **treatment plan guide** for the patient to take home
+   - a **consent form** for the planned treatment: what it involves, benefits, material risks, alternatives (including no treatment), aftercare and cost, followed by standard declarations and signature boxes for the patient and you
    - a **patient presentation**: branded slides using the patient's own photos and radiographs, with a script for each slide. **Present** shows them full screen for screen-recording a video (arrow keys to move, N for your script, Esc to finish).
 
    Add fees or anything to mention in the box before writing. Every document can be edited, printed or saved as a PDF, and copied as text. **Copy analysis as text** on the Analysis tab copies the analysis itself.

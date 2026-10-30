@@ -32,6 +32,17 @@ export const DOCUMENT_SCHEMAS = {
       }),
     ),
   }),
+  consent: z.object({
+    title: z.string(),
+    treatment: z.string(),
+    teeth: z.string(),
+    benefits: z.array(z.string()),
+    risks: z.array(z.object({ risk: z.string(), detail: z.string() })),
+    alternatives: z.array(z.object({ option: z.string(), summary: z.string() })),
+    noTreatment: z.string(),
+    aftercare: z.array(z.string()),
+    cost: z.string(),
+  }),
 } satisfies { [K in DocumentKind]: z.ZodType<DocumentContentMap[K]> };
 
 export const DOCUMENT_LABELS: Record<DocumentKind, string> = {
@@ -39,6 +50,7 @@ export const DOCUMENT_LABELS: Record<DocumentKind, string> = {
   records: "Clinical records note",
   guide: "Treatment plan guide",
   presentation: "Patient presentation",
+  consent: "Consent form",
 };
 
 const COMMON_RULES = `Ground rules:
@@ -50,6 +62,16 @@ const COMMON_RULES = `Ground rules:
 - For patient-facing documents, follow GDC and Montgomery consent principles: explain what is involved, the benefits, the material risks, the reasonable alternatives (including no treatment and its likely consequences), costs and what happens next, in plain language a patient can follow. Describe teeth in words with the FDI number in brackets, e.g. "lower left first molar (36)".`;
 
 const KIND_PROMPTS: Record<DocumentKind, string> = {
+  consent: `Write the treatment-specific part of a written consent form for the treatment being planned, for the patient to read and sign. The app adds the standard declarations (explained, questions answered, costs given, can withdraw at any time) and the signature boxes, so do not write those.
+- title: e.g. "Consent for a dental implant to replace the lower left first molar (36)".
+- treatment: what the treatment involves, step by step in plain language, in 3 to 6 sentences, including the number of visits and any anaesthetic or sedation planned.
+- teeth: the teeth involved in FDI notation, e.g. "36" or "11, 21".
+- benefits: 2 to 5 short points.
+- risks: every material risk a reasonable patient in this patient's position would want to know (Montgomery), including common minor ones and rare serious ones relevant to this treatment and this patient's medical history (e.g. smoking, diabetes, antiresorptives). risk is a short name ("Nerve injury"), detail says what it means and roughly how common it is in words ("rare", "uncommon", "common") without invented percentages.
+- alternatives: every reasonable alternative from the analysis other than the proposed treatment, each with a one-sentence summary of its main trade-off. Do not include no treatment here.
+- noTreatment: the likely consequences of having no treatment, in 1 to 3 sentences.
+- aftercare: what the patient needs to do for the treatment to succeed (hygiene, reviews, not smoking, wearing a guard).
+- cost: the fee from the dentist's instructions, or "[fee]".`,
   letter: `Write a treatment plan letter from the dentist to the patient, written in the first person as the dentist.
 - subject: a short subject line, e.g. "Your treatment plan: replacing the lower left back tooth".
 - paragraphs: the body only, 5 to 10 short paragraphs. No greeting ("Dear ...") and no sign-off; the letterhead adds them. Start by thanking the patient for coming in and summarising what they came in about. Cover what was found, the options (including no treatment), the recommended plan step by step, risks, costs and how to go ahead or ask questions. Warm and clear, not salesy.`,
@@ -152,6 +174,8 @@ export function buildDocumentText(
       if (t.advantages.length) lines.push(`   Advantages: ${t.advantages.join("; ")}`);
       if (t.disadvantages.length) lines.push(`   Disadvantages: ${t.disadvantages.join("; ")}`);
       if (t.prerequisites.length) lines.push(`   Before starting: ${t.prerequisites.join("; ")}`);
+      if (t.prognosis) lines.push(`   Prognosis: ${t.prognosis}`);
+      if (t.maintenance) lines.push(`   Maintenance: ${t.maintenance}`);
     });
     if (o.risksAndFlags.length) lines.push("", "Risks and flags:", ...o.risksAndFlags.map((x) => `- ${x}`));
   }
