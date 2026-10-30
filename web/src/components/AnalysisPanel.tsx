@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Analysis, AnalysisReview, Case, FindingBasis, ReviewVerdict } from "../../../shared/types";
+import { ANALYSIS_MODELS, type Analysis, type AnalysisModel, type AnalysisReview, type Case, type FindingBasis, type ReviewVerdict } from "../../../shared/types";
 import { analysisText } from "../lib/analysisText";
 import { MAX_IMAGES } from "../../../shared/imageBudget";
 import { api } from "../lib/api";
@@ -19,6 +19,19 @@ const VERDICT_LABEL: Record<ReviewVerdict, string> = {
 
 export function AnalysisPanel({ c, onChange, onWriteDocuments }: { c: Case; onChange: () => void; onWriteDocuments: () => void }) {
   const [question, setQuestion] = useState("");
+  const [model, setModel] = useState<AnalysisModel>(() => {
+    try {
+      const saved = localStorage.getItem("analysisModel");
+      if (saved && saved in ANALYSIS_MODELS) return saved as AnalysisModel;
+    } catch {}
+    return "claude-opus-5-5";
+  });
+  const chooseModel = (m: AnalysisModel) => {
+    setModel(m);
+    try {
+      localStorage.setItem("analysisModel", m);
+    } catch {}
+  };
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(c.analyses[0]?.id ?? null);
@@ -33,7 +46,7 @@ export function AnalysisPanel({ c, onChange, onWriteDocuments }: { c: Case; onCh
     setRunning(true);
     setError(null);
     try {
-      const a = await api.analyse(c.id, question);
+      const a = await api.analyse(c.id, question, model);
       if (a.status === "failed") setError(a.error ?? "The analysis failed.");
       setSelectedId(a.id);
       onChange();
@@ -69,13 +82,23 @@ export function AnalysisPanel({ c, onChange, onWriteDocuments }: { c: Case; onCh
             onChange={(e) => setQuestion(e.target.value)}
           />
         </label>
+        <label>
+          <span>Model</span>
+          <select value={model} onChange={(e) => chooseModel(e.target.value as AnalysisModel)}>
+            {Object.entries(ANALYSIS_MODELS).map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="row">
           <button className="primary" onClick={run} disabled={running}>
             {running ? "Analysing…" : "Analyse case"}
           </button>
           {running && (
             <span className="row small muted">
-              <span className="spinner" /> This usually takes 30 to 90 seconds.
+              <span className="spinner" /> A full work-up usually takes 2 to 6 minutes.
             </span>
           )}
         </div>
@@ -116,7 +139,7 @@ function AnalysisView({ c, a, onChange, onWriteDocuments }: { c: Case; a: Analys
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Case summary</h2>
           <span className="small muted">
-            {new Date(a.createdAt).toLocaleString("en-GB")} · {a.inputSummary.imageCount} images
+            {new Date(a.createdAt).toLocaleString("en-GB")} · {ANALYSIS_MODELS[a.model as AnalysisModel] ? ANALYSIS_MODELS[a.model as AnalysisModel].split(" (")[0] : a.model} · {a.inputSummary.imageCount} images
             {a.inputSummary.omittedImageCount ? ` (${a.inputSummary.omittedImageCount} left out)` : ""} · {a.inputSummary.measurementCount} measurements
           </span>
         </div>
@@ -145,6 +168,75 @@ function AnalysisView({ c, a, onChange, onWriteDocuments }: { c: Case; a: Analys
               <li key={i}>{x}</li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {o.diagnoses && o.diagnoses.length > 0 && (
+        <section className="panel stack">
+          <h3>Working diagnoses</h3>
+          <ul>
+            {o.diagnoses.map((d, i) => (
+              <li key={i}>
+                <strong>{d.diagnosis}</strong>
+                {d.teeth && <span className="mono"> ({d.teeth})</span>}. {d.rationale}
+                {d.differentials.length > 0 && <span className="small muted"> Rule out: {d.differentials.join("; ")}.</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {o.assessments && o.assessments.length > 0 && (
+        <section className="panel stack">
+          <h3>Assessment by area</h3>
+          <dl className="assessments">
+            {o.assessments.map((x, i) => (
+              <div key={i}>
+                <dt>{x.area}</dt>
+                <dd>{x.assessment}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
+
+      {o.recordReviews && o.recordReviews.length > 0 && (
+        <section className="panel stack">
+          <h3>Record by record</h3>
+          {o.recordReviews.map((r, i) => (
+            <div key={i}>
+              <strong>{r.record}</strong>
+              <List items={r.observations} />
+            </div>
+          ))}
+        </section>
+      )}
+
+      {o.toothChart && o.toothChart.length > 0 && (
+        <section className="panel stack">
+          <h3>Tooth chart</h3>
+          <div className="table-wrap">
+            <table className="findings">
+              <thead>
+                <tr>
+                  <th>Tooth</th>
+                  <th>Status</th>
+                  <th>Prognosis</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {o.toothChart.map((t, i) => (
+                  <tr key={i}>
+                    <td className="mono">{t.tooth}</td>
+                    <td>{t.status}</td>
+                    <td className="small">{t.prognosis}</td>
+                    <td className="small">{t.notes}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
@@ -188,9 +280,20 @@ function AnalysisView({ c, a, onChange, onWriteDocuments }: { c: Case; a: Analys
               </h3>
               <p>{t.description}</p>
               {t.addresses.length > 0 && <p className="small muted">Addresses: {t.addresses.join("; ")}</p>}
+              {t.sequence && t.sequence.length > 0 && <List title="Sequence" items={t.sequence} ordered />}
               <List title="Advantages" items={t.advantages} />
               <List title="Disadvantages" items={t.disadvantages} />
               <List title="Before starting" items={t.prerequisites} />
+              {t.prognosis && (
+                <p className="small">
+                  <strong>Prognosis:</strong> {t.prognosis}
+                </p>
+              )}
+              {t.maintenance && (
+                <p className="small">
+                  <strong>Maintenance:</strong> {t.maintenance}
+                </p>
+              )}
             </article>
           ))}
         </div>
@@ -212,16 +315,17 @@ function AnalysisView({ c, a, onChange, onWriteDocuments }: { c: Case; a: Analys
   );
 }
 
-function List({ title, items }: { title?: string; items: string[] }) {
+function List({ title, items, ordered }: { title?: string; items: string[]; ordered?: boolean }) {
   if (!items.length) return null;
+  const Tag = ordered ? "ol" : "ul";
   return (
     <div>
       {title && <strong className="small">{title}</strong>}
-      <ul className="small">
+      <Tag className="small">
         {items.map((x, i) => (
           <li key={i}>{x}</li>
         ))}
-      </ul>
+      </Tag>
     </div>
   );
 }

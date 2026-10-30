@@ -1,5 +1,6 @@
 import type {
   Analysis,
+  AnalysisModel,
   AnalysisReview,
   BrandSettings,
   Case,
@@ -89,7 +90,8 @@ export const api = {
     request<CaseRecord>(`/api/cases/${caseId}/records/${recordId}/previews/${name}`, { method: "DELETE" }),
   fileUrl: (caseId: string, storedName: string) => `/api/cases/${caseId}/files/${storedName}`,
 
-  analyse: (caseId: string, question: string) => request<Analysis>(`/api/cases/${caseId}/analyses`, json("POST", { question })),
+  analyse: (caseId: string, question: string, model: AnalysisModel) =>
+    request<Analysis>(`/api/cases/${caseId}/analyses`, json("POST", { question, model })),
   saveReview: (caseId: string, analysisId: string, review: Partial<AnalysisReview>) =>
     request<Analysis>(`/api/cases/${caseId}/analyses/${analysisId}/review`, json("PUT", review)),
 

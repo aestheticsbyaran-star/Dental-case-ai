@@ -240,3 +240,7 @@ button.slide-thumb:hover .slide { outline: 2px solid var(--accent); }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 .settings .paper-scroll .paper { zoom: 0.72; }
+
+.assessments { display: grid; gap: 10px; margin: 0; }
+.assessments dt { font-weight: 600; }
+.assessments dd { margin: 2px 0 0; }

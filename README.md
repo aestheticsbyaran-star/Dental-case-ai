@@ -65,7 +65,7 @@ When writing a document, only text is sent: the case details, your measurements,
 
 Original DICOM headers, file metadata and the original files themselves are not sent. Keep names, dates of birth and addresses out of the text fields.
 
-The app uses the `claude-opus-5-5` model. Claude is instructed to only quote measurements you made, to label its own image reading as a visual impression, and not to give millimetre values from images itself.
+Analyses use Claude Opus 5.5 (`claude-opus-5-5`) by default, or Claude Fable 5.1 (`claude-fable-5-1`, Anthropic's most capable model, about 2.5 times the cost) if you pick it on the Analysis tab. Both run at the highest effort setting and give a full work-up: a record-by-record read, assessment by area, tooth chart, working diagnoses, findings, and phased treatment options with prognosis. Claude is instructed to only quote measurements you made, to label its own image reading as a visual impression, and not to give millimetre values from images itself.
 
 ## Current limits
 

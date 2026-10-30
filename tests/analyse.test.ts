@@ -60,3 +60,26 @@ describe("buildCaseText", () => {
     expect(text).toContain("Question from the dentist: Is 46 restorable?");
   });
 });
+
+describe("runAnalysis", () => {
+  it("asks the chosen model for a full work-up at the highest effort", async () => {
+    const { runAnalysis, analysisModel } = await import("../server/analyse");
+    let params: any;
+    const output = { caseSummary: "s", findings: [], treatmentOptions: [], risksAndFlags: [], missingInformation: [], suggestedNextSteps: [] };
+    const client: any = {
+      messages: {
+        stream: (p: any) => {
+          params = p;
+          return { finalMessage: async () => ({ stop_reason: "end_turn", parsed_output: output, usage: { input_tokens: 1, output_tokens: 2 } }) };
+        },
+      },
+    };
+    const result = await runAnalysis(client, baseCase, [], "", analysisModel("claude-fable-5-1"));
+    expect(params.model).toBe("claude-fable-5-1");
+    expect(params.output_config.effort).toBe("max");
+    expect(params.max_tokens).toBe(64000);
+    expect(params.system).toContain("recordReviews");
+    expect(result.output).toBe(output);
+    expect(analysisModel("gpt-4")).toBe("claude-opus-5-5");
+  });
+});

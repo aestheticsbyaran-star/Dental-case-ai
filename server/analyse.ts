@@ -5,15 +5,37 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import sharp from "sharp";
 import { z } from "zod";
 import { selectImages } from "../shared/imageBudget.js";
-import type { AnalysisOutput, Case, CaseRecord } from "../shared/types.js";
+import { ANALYSIS_MODELS, type AnalysisModel, type AnalysisOutput, type Case, type CaseRecord } from "../shared/types.js";
 import { filePath } from "./store.js";
 
-export const MODEL = "claude-opus-5-5";
+export const MODEL: AnalysisModel = "claude-opus-5-5";
+
+export function analysisModel(value: unknown): AnalysisModel {
+  return typeof value === "string" && value in ANALYSIS_MODELS ? (value as AnalysisModel) : MODEL;
+}
 /** Claude Opus 5.5 reads images up to 2576 px on the long edge; above 20 images the API rejects any over 3000 px. */
 const AI_MAX_EDGE = 2576;
 
 const AnalysisSchema = z.object({
   caseSummary: z.string(),
+  recordReviews: z.array(z.object({ record: z.string(), observations: z.array(z.string()) })),
+  assessments: z.array(z.object({ area: z.string(), assessment: z.string() })),
+  toothChart: z.array(
+    z.object({
+      tooth: z.string(),
+      status: z.string(),
+      prognosis: z.enum(["good", "fair", "questionable", "poor", "hopeless", "not assessed"]),
+      notes: z.string(),
+    }),
+  ),
+  diagnoses: z.array(
+    z.object({
+      diagnosis: z.string(),
+      teeth: z.string(),
+      rationale: z.string(),
+      differentials: z.array(z.string()),
+    }),
+  ),
   findings: z.array(
     z.object({
       tooth: z.string().nullable(),
@@ -28,9 +50,12 @@ const AnalysisSchema = z.object({
       title: z.string(),
       description: z.string(),
       addresses: z.array(z.string()),
+      sequence: z.array(z.string()),
       advantages: z.array(z.string()),
       disadvantages: z.array(z.string()),
       prerequisites: z.array(z.string()),
+      prognosis: z.string(),
+      maintenance: z.string(),
     }),
   ),
   risksAndFlags: z.array(z.string()),
@@ -53,10 +78,16 @@ How to treat the inputs:
 - CBCT images are single slices or maximum intensity projections (MIPs) cut from the volume, labelled with the view. A MIP superimposes everything along its direction, so use it for overview only. Views the dentist added by hand may show their measurement lines drawn on.
 - If records conflict (e.g. notes say a tooth is present but the radiograph suggests otherwise), say so in risksAndFlags.
 
+Be thorough. The dentist wants a full specialist-level work-up, not a brief overview: work through every record and every area systematically, and include everything clinically relevant, including incidental findings. Depth and accuracy matter more than brevity.
+
 What to produce:
-- caseSummary: 3-6 sentences pulling the case together around the chief complaint and patient goals.
+- caseSummary: a full paragraph (6-10 sentences) pulling the case together around the chief complaint and patient goals, including the overall diagnosis, risk profile and the main decision the dentist faces.
+- recordReviews: one entry per record you were given, in order, using its caption. Report a systematic read, not just the headline. For an OPG: each quadrant, missing and restored teeth, caries, periapical areas, root fillings, bone levels and pattern of loss, furcations, third molars, the inferior alveolar canals, maxillary sinuses, condyles and any incidental findings. For periapicals and bitewings: crowns, contacts, caries, restorations, root form, PDL space, bone crest. For photos: soft tissues, gingival form and recession, tooth wear, existing restorations, shade, smile line and aesthetics. For scans: arch form, alignment, spacing and crowding, wear facets, occlusion as far as the views allow. For CBCT: bone width and height qualitatively, cortical plates, canal and sinus relationships, pathology. Say plainly when an image is not of diagnostic quality.
+- assessments: one entry for each of these areas, saying "not assessable from the records" where that is the case: periodontal, caries and restorative, endodontic, occlusion and TMJ, tooth wear, orthodontic and alignment, aesthetics, soft tissues and oral mucosa, edentulous spaces and implant sites.
+- toothChart: an entry for every tooth you can assess (present, missing, restored, or with a finding), in FDI order. status is short (e.g. "MOD amalgam, recurrent caries distal", "missing", "sound"). prognosis is your provisional view; use "not assessed" when the records don't support one.
+- diagnoses: the working diagnoses (e.g. "Generalised periodontitis, stage III grade B", "Symptomatic irreversible pulpitis 36"), each with the teeth involved, the rationale from the records, and any differential diagnoses to rule out. Use current classifications (2017 AAP/EFP for periodontal disease) where they apply.
 - findings: one entry per tooth-level or arch-level finding. tooth is null for general findings. source names the record caption or note it came from.
-- treatmentOptions: 2-4 realistic options that fit the patient's goals, from conservative to comprehensive. Include phased care (stabilisation, hygiene, endodontics) when relevant. addresses lists the findings each option deals with.
+- treatmentOptions: 2-4 realistic options that fit the patient's goals, from conservative to comprehensive. For each: sequence lists the phases in order (e.g. stabilisation and hygiene phase, endodontics, definitive restoration, replacement of missing teeth, maintenance), prognosis gives the expected outcome and its main risks, maintenance describes long-term care and review. addresses lists the findings each option deals with.
 - risksAndFlags: medical history interactions (e.g. antiresorptives, anticoagulants, diabetes, smoking), contraindications, and anything urgent.
 - missingInformation: records or tests that would change the plan (e.g. sensibility testing, periodontal charting, a CBCT for a specific site).
 - suggestedNextSteps: practical steps before the treatment-planning appointment.`;
@@ -148,15 +179,22 @@ export async function runAnalysis(
   c: Case,
   records: CaseRecord[],
   question: string,
+  model: AnalysisModel = MODEL,
 ): Promise<{ output: AnalysisOutput; imageCount: number; omittedImageCount: number; usage: { inputTokens: number; outputTokens: number } }> {
   const { content, imageCount, omittedImageCount } = await buildMessageContent(c, records, question);
-  const response = await client.messages.parse({
-    model: MODEL,
-    max_tokens: 16000,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content }],
-    output_config: { effort: "high", format: zodOutputFormat(AnalysisSchema) },
-  });
+  // Highest effort: accuracy matters more than speed or cost here. Streaming avoids HTTP
+  // timeouts on long answers, and max_tokens leaves room for thinking plus a full work-up.
+  const stream = client.messages.stream(
+    {
+      model,
+      max_tokens: 64000,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content }],
+      output_config: { effort: "max", format: zodOutputFormat(AnalysisSchema) },
+    },
+    { timeout: 30 * 60 * 1000 },
+  );
+  const response = await stream.finalMessage();
 
   if (response.stop_reason === "refusal") {
     throw new Error(`Claude declined this request${response.stop_details?.explanation ? `: ${response.stop_details.explanation}` : "."}`);
