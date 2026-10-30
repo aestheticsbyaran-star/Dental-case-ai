@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   BrandSettings,
+  CardsContent,
+  CareCard,
   Case,
   ConsentContent,
+  DocumentImage,
+  FaqContent,
+  MouthContent,
+  TimelineContent,
   DocumentKind,
   GuideContent,
   GuideSection,
@@ -14,7 +20,19 @@ import type {
 } from "../../../shared/types";
 import { api } from "../lib/api";
 import { PrintOnly, fullName, useBrand } from "../lib/brand";
-import { CONSENT_DECLARATIONS, ConsentPaper, CoverSlide, EndSlide, GuidePaper, LetterPaper, SlideFrame } from "./DocumentViews";
+import {
+  CONSENT_DECLARATIONS,
+  CardsPaper,
+  ConsentPaper,
+  CoverSlide,
+  EndSlide,
+  FaqPaper,
+  GuidePaper,
+  LetterPaper,
+  MouthPaper,
+  SlideFrame,
+  TimelinePaper,
+} from "./DocumentViews";
 
 export const DOCUMENT_KINDS: { kind: DocumentKind; label: string; blurb: string; placeholder: string }[] = [
   {
@@ -46,6 +64,30 @@ export const DOCUMENT_KINDS: { kind: DocumentKind; label: string; blurb: string;
     label: "Consent form",
     blurb: "Treatment-specific risks, benefits and alternatives (including no treatment), with declarations and signature boxes.",
     placeholder: "e.g. Fee £2,450. Under local anaesthetic, no sedation. Mention the bone graft may be needed.",
+  },
+  {
+    kind: "timeline",
+    label: "Treatment journey",
+    blurb: "A visual roadmap of each visit: what happens and how they will feel.",
+    placeholder: "e.g. 4 visits over about 4 months. Hygiene visit first. Temporary tooth while healing.",
+  },
+  {
+    kind: "mouth",
+    label: "Your mouth today",
+    blurb: "Their own photos and X-rays with simple labels explaining what you found.",
+    placeholder: "e.g. Point out the bone loss on the OPG and that the front teeth are healthy.",
+  },
+  {
+    kind: "cards",
+    label: "Before and aftercare cards",
+    blurb: "A short branded card for each appointment: how to prepare and what to do afterwards.",
+    placeholder: "e.g. IV sedation at visit 1, so they need an escort. We prescribe chlorhexidine.",
+  },
+  {
+    kind: "faqs",
+    label: "Treatment FAQs",
+    blurb: "Answers to the usual worries: pain, time off, how long it lasts and more.",
+    placeholder: "e.g. They are worried about pain and taking time off work.",
   },
 ];
 
@@ -99,7 +141,7 @@ export function DocumentsPanel({ c, onChange }: { c: Case; onChange: () => void 
       <section className="panel stack">
         <h2>Patient documents</h2>
         <p className="muted">
-          Run an analysis on the Analysis tab first. Letters, records notes, guides, presentations and consent forms are written from an analysis and
+          Run an analysis on the Analysis tab first. Patient documents and records notes are written from an analysis and
           your final plan.
         </p>
       </section>
@@ -251,6 +293,14 @@ function DocumentView({ c, doc, onChange }: { c: Case; doc: PatientDocument; onC
       return <PresentationView {...props} doc={doc} content={doc.content as PresentationContent} />;
     case "consent":
       return <ConsentView {...props} content={doc.content as ConsentContent} />;
+    case "timeline":
+      return <TimelineView {...props} content={doc.content as TimelineContent} />;
+    case "mouth":
+      return <MouthView {...props} doc={doc} content={doc.content as MouthContent} />;
+    case "cards":
+      return <CardsView {...props} content={doc.content as CardsContent} />;
+    case "faqs":
+      return <FaqView {...props} content={doc.content as FaqContent} />;
   }
 }
 
@@ -491,6 +541,266 @@ function ConsentView({ content, onSave, onDelete }: ViewProps<ConsentContent>) {
       )}
       <PrintOnly>
         <ConsentPaper brand={brand} content={content} patientName={name} />
+      </PrintOnly>
+    </div>
+  );
+}
+
+/** Edits a list of items with move, remove and add buttons around each one. */
+function ItemsEditor<T>({
+  items,
+  onChange,
+  blank,
+  addLabel,
+  render,
+}: {
+  items: T[];
+  onChange: (items: T[]) => void;
+  blank: T;
+  addLabel: string;
+  render: (item: T, set: (patch: Partial<T>) => void) => ReactNode;
+}) {
+  const move = (i: number, by: number) => {
+    const next = [...items];
+    const [x] = next.splice(i, 1);
+    next.splice(i + by, 0, x);
+    onChange(next);
+  };
+  return (
+    <>
+      {items.map((item, i) => (
+        <div key={i} className="stack edit-block">
+          {render(item, (patch) => onChange(items.map((x, j) => (j === i ? { ...x, ...patch } : x))))}
+          <div className="row">
+            <button disabled={i === 0} onClick={() => move(i, -1)}>
+              Move up
+            </button>
+            <button disabled={i === items.length - 1} onClick={() => move(i, 1)}>
+              Move down
+            </button>
+            <button className="danger" onClick={() => onChange(items.filter((_, j) => j !== i))}>
+              Remove
+            </button>
+          </div>
+        </div>
+      ))}
+      <div>
+        <button onClick={() => onChange([...items, blank])}>{addLabel}</button>
+      </div>
+    </>
+  );
+}
+
+/** A textarea for a list of short lines. Blank lines are dropped when it loses focus. */
+function LinesInput({ label, value, onChange, rows = 4 }: { label: string; value: string[]; onChange: (v: string[]) => void; rows?: number }) {
+  return (
+    <label>
+      <span>{label} (one per line)</span>
+      <textarea
+        rows={rows}
+        value={value.join("\n")}
+        onChange={(e) => onChange(e.target.value.split("\n"))}
+        onBlur={(e) => onChange(listOf(e.target.value))}
+      />
+    </label>
+  );
+}
+
+function TextField({ label, value, onChange, rows }: { label: string; value: string; onChange: (v: string) => void; rows?: number }) {
+  return (
+    <label>
+      <span>{label}</span>
+      {rows ? <textarea rows={rows} value={value} onChange={(e) => onChange(e.target.value)} /> : <input value={value} onChange={(e) => onChange(e.target.value)} />}
+    </label>
+  );
+}
+
+function PrintBar({ text }: { text: () => string }) {
+  return (
+    <>
+      <button className="primary" onClick={() => window.print()}>
+        Print or save as PDF
+      </button>
+      <CopyButton text={text} />
+    </>
+  );
+}
+
+function TimelineView({ content, onSave, onDelete }: ViewProps<TimelineContent>) {
+  const { brand } = useBrand();
+  const d = useDraft(content, onSave);
+  const text = () =>
+    [content.title, content.intro, ...content.visits.map((v, i) => `${i + 1}. ${v.name} (${[v.when, v.duration].filter(Boolean).join(", ")})\n${v.whatHappens}\nHow you'll feel: ${v.howYouFeel}`), content.closing]
+      .filter(Boolean)
+      .join("\n\n");
+  return (
+    <div className="stack">
+      <EditBar d={d} onDelete={onDelete}>
+        <PrintBar text={text} />
+      </EditBar>
+      {d.editing ? (
+        <div className="panel stack">
+          <TextField label="Title" value={d.draft.title} onChange={(title) => d.setDraft({ ...d.draft, title })} />
+          <TextField label="Introduction" rows={2} value={d.draft.intro} onChange={(intro) => d.setDraft({ ...d.draft, intro })} />
+          <ItemsEditor
+            items={d.draft.visits}
+            onChange={(visits) => d.setDraft({ ...d.draft, visits })}
+            blank={{ name: "New step", when: "", duration: "", whatHappens: "", howYouFeel: "" }}
+            addLabel="Add step"
+            render={(v, set) => (
+              <>
+                <div className="form-grid">
+                  <TextField label="Step" value={v.name} onChange={(name) => set({ name })} />
+                  <TextField label="When" value={v.when} onChange={(when) => set({ when })} />
+                  <TextField label="How long" value={v.duration} onChange={(duration) => set({ duration })} />
+                </div>
+                <TextField label="What happens" rows={3} value={v.whatHappens} onChange={(whatHappens) => set({ whatHappens })} />
+                <TextField label="How you'll feel" rows={2} value={v.howYouFeel} onChange={(howYouFeel) => set({ howYouFeel })} />
+              </>
+            )}
+          />
+          <TextField label="Closing line" rows={2} value={d.draft.closing} onChange={(closing) => d.setDraft({ ...d.draft, closing })} />
+        </div>
+      ) : (
+        <div className="paper-scroll">
+          <TimelinePaper brand={brand} content={content} />
+        </div>
+      )}
+      <PrintOnly>
+        <TimelinePaper brand={brand} content={content} />
+      </PrintOnly>
+    </div>
+  );
+}
+
+function MouthView({ c, doc, content, onSave, onDelete }: ViewProps<MouthContent> & { doc: PatientDocument }) {
+  const { brand } = useBrand();
+  const d = useDraft(content, onSave);
+  const images: DocumentImage[] = doc.images ?? [];
+  const imageUrl = (i: number | null) => (i === null || !images[i] ? undefined : api.fileUrl(c.id, images[i].preview));
+  const text = () => [content.title, content.intro, ...content.items.map((m, i) => `${i + 1}. ${m.heading}\n${m.explanation}`), content.summary].filter(Boolean).join("\n\n");
+  return (
+    <div className="stack">
+      <EditBar d={d} onDelete={onDelete}>
+        <PrintBar text={text} />
+      </EditBar>
+      {d.editing ? (
+        <div className="panel stack">
+          <TextField label="Title" value={d.draft.title} onChange={(title) => d.setDraft({ ...d.draft, title })} />
+          <TextField label="Introduction" rows={2} value={d.draft.intro} onChange={(intro) => d.setDraft({ ...d.draft, intro })} />
+          <ItemsEditor
+            items={d.draft.items}
+            onChange={(items) => d.setDraft({ ...d.draft, items })}
+            blank={{ heading: "New point", explanation: "", imageIndex: null }}
+            addLabel="Add point"
+            render={(m, set) => (
+              <>
+                <TextField label="Label" value={m.heading} onChange={(heading) => set({ heading })} />
+                <TextField label="Explanation" rows={3} value={m.explanation} onChange={(explanation) => set({ explanation })} />
+                <label>
+                  <span>Image</span>
+                  <select value={m.imageIndex ?? ""} onChange={(e) => set({ imageIndex: e.target.value === "" ? null : Number(e.target.value) })}>
+                    <option value="">No image</option>
+                    {images.map((img, j) => (
+                      <option key={j} value={j}>
+                        {img.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
+          />
+          <TextField label="Summary" rows={2} value={d.draft.summary} onChange={(summary) => d.setDraft({ ...d.draft, summary })} />
+        </div>
+      ) : (
+        <div className="paper-scroll">
+          <MouthPaper brand={brand} content={content} imageUrl={imageUrl} />
+        </div>
+      )}
+      <PrintOnly>
+        <MouthPaper brand={brand} content={content} imageUrl={imageUrl} />
+      </PrintOnly>
+    </div>
+  );
+}
+
+function CardsView({ content, onSave, onDelete }: ViewProps<CardsContent>) {
+  const { brand } = useBrand();
+  const d = useDraft(content, onSave);
+  const list = (title: string, items: string[]) => (items.length ? `${title}\n${items.map((x) => `- ${x}`).join("\n")}` : "");
+  const text = () =>
+    content.cards
+      .map((k) => [k.visit.toUpperCase(), list("Before your visit", k.before), list("After your visit", k.after), list("Call us if", k.callUsIf)].filter(Boolean).join("\n\n"))
+      .join("\n\n\n");
+  const blank: CareCard = { visit: "New visit", before: [], after: [], callUsIf: [] };
+  return (
+    <div className="stack">
+      <EditBar d={d} onDelete={onDelete}>
+        <PrintBar text={text} />
+      </EditBar>
+      <p className="small muted">Cards print four to an A4 page, ready to cut out.</p>
+      {d.editing ? (
+        <div className="panel stack">
+          <ItemsEditor
+            items={d.draft.cards}
+            onChange={(cards) => d.setDraft({ cards })}
+            blank={blank}
+            addLabel="Add card"
+            render={(k, set) => (
+              <>
+                <TextField label="Visit" value={k.visit} onChange={(visit) => set({ visit })} />
+                <div className="form-grid">
+                  <LinesInput label="Before your visit" value={k.before} onChange={(before) => set({ before })} />
+                  <LinesInput label="After your visit" value={k.after} onChange={(after) => set({ after })} />
+                  <LinesInput label="Call us if" value={k.callUsIf} onChange={(callUsIf) => set({ callUsIf })} />
+                </div>
+              </>
+            )}
+          />
+        </div>
+      ) : (
+        <CardsPaper brand={brand} content={content} />
+      )}
+      <PrintOnly>
+        <CardsPaper brand={brand} content={content} />
+      </PrintOnly>
+    </div>
+  );
+}
+
+function FaqView({ content, onSave, onDelete }: ViewProps<FaqContent>) {
+  const { brand } = useBrand();
+  const d = useDraft(content, onSave);
+  const text = () => [content.title, ...content.items.map((q) => `${q.question}\n${q.answer}`)].join("\n\n");
+  return (
+    <div className="stack">
+      <EditBar d={d} onDelete={onDelete}>
+        <PrintBar text={text} />
+      </EditBar>
+      {d.editing ? (
+        <div className="panel stack">
+          <TextField label="Title" value={d.draft.title} onChange={(title) => d.setDraft({ ...d.draft, title })} />
+          <ItemsEditor
+            items={d.draft.items}
+            onChange={(items) => d.setDraft({ ...d.draft, items })}
+            blank={{ question: "New question", answer: "" }}
+            addLabel="Add question"
+            render={(q, set) => (
+              <>
+                <TextField label="Question" value={q.question} onChange={(question) => set({ question })} />
+                <TextField label="Answer" rows={3} value={q.answer} onChange={(answer) => set({ answer })} />
+              </>
+            )}
+          />
+        </div>
+      ) : (
+        <div className="paper-scroll">
+          <FaqPaper brand={brand} content={content} />
+        </div>
+      )}
+      <PrintOnly>
+        <FaqPaper brand={brand} content={content} />
       </PrintOnly>
     </div>
   );

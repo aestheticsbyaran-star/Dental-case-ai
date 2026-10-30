@@ -45,9 +45,13 @@ Case files are saved in `./data` (change it with `DATA_DIR` in `.env`). Back tha
    - a **records note** to paste into your practice software
    - a **treatment plan guide** for the patient to take home
    - a **consent form** for the planned treatment: what it involves, benefits, material risks, alternatives (including no treatment), aftercare and cost, followed by standard declarations and signature boxes for the patient and you
+   - a **treatment journey**: a visual roadmap of each visit, what happens and how the patient will feel
+   - **your mouth today**: the patient's own photos and radiographs with simple labels explaining what you found
+   - **before and aftercare cards**: one short card per appointment, printed four to a page
+   - **treatment FAQs**: pain, time off, how long it lasts and other usual worries
    - a **patient presentation**: branded slides using the patient's own photos and radiographs, with a script for each slide. **Present** shows them full screen for screen-recording a video (arrow keys to move, N for your script, Esc to finish).
 
-   Add fees or anything to mention in the box before writing. Every document can be edited, printed or saved as a PDF, and copied as text. **Copy analysis as text** on the Analysis tab copies the analysis itself.
+   Add fees or anything to mention in the box before writing (the journey, mouth, card and FAQ documents leave fees out). Every document can be edited, printed or saved as a PDF, and copied as text. **Copy analysis as text** on the Analysis tab copies the analysis itself.
 
 ## Branding
 
@@ -62,7 +66,7 @@ For records ticked **Include in AI analysis**:
 - your measurements, with units and calibration source
 - your question
 
-When writing a document, only text is sent: the case details, your measurements, the analysis, your final plan, your instructions, your practice name and writing style, and for presentations the captions of the case images (not the images).
+When writing a document, only text is sent: the case details, your measurements, the analysis, your final plan, your instructions, your practice name and writing style, and for presentations and Your mouth today the captions of the case images (not the images).
 
 Original DICOM headers, file metadata and the original files themselves are not sent. Keep names, dates of birth and addresses out of the text fields.
 

@@ -1,6 +1,16 @@
 // Branded layouts for letters, guides and slides. Used on screen, in print and in the slideshow.
 import type { CSSProperties } from "react";
-import type { BrandSettings, ConsentContent, GuideContent, LetterContent, Slide } from "../../../shared/types";
+import type {
+  BrandSettings,
+  CardsContent,
+  ConsentContent,
+  FaqContent,
+  GuideContent,
+  LetterContent,
+  MouthContent,
+  Slide,
+  TimelineContent,
+} from "../../../shared/types";
 import { api } from "../lib/api";
 import { contactLine, fullName } from "../lib/brand";
 
@@ -288,5 +298,123 @@ export function EndSlide({ brand }: { brand: BrandSettings }) {
         </p>
       ))}
     </div>
+  );
+}
+
+export function TimelinePaper({ brand, content }: { brand: BrandSettings; content: TimelineContent }) {
+  return (
+    <article className="paper guide" style={brandStyle(brand)}>
+      <header className="guide-head">
+        <BrandMark brand={brand} />
+      </header>
+      <h1 className="guide-title">{content.title}</h1>
+      {content.intro && <p className="guide-intro">{content.intro}</p>}
+      <ol className="journey">
+        {content.visits.map((v, i) => (
+          <li key={i}>
+            <span className="journey-dot">{i + 1}</span>
+            <div className="journey-body">
+              <div className="journey-when">{[v.when, v.duration].filter(Boolean).join(" · ")}</div>
+              <h2>{v.name}</h2>
+              <p>{v.whatHappens}</p>
+              {v.howYouFeel && (
+                <p className="journey-feel">
+                  <strong>How you'll feel: </strong>
+                  {v.howYouFeel}
+                </p>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+      {content.closing && <p className="guide-intro">{content.closing}</p>}
+      <footer className="paper-footer">{contactLine(brand)}</footer>
+    </article>
+  );
+}
+
+export function MouthPaper({
+  brand,
+  content,
+  imageUrl,
+}: {
+  brand: BrandSettings;
+  content: MouthContent;
+  imageUrl: (index: number | null) => string | undefined;
+}) {
+  return (
+    <article className="paper guide" style={brandStyle(brand)}>
+      <header className="guide-head">
+        <BrandMark brand={brand} />
+      </header>
+      <h1 className="guide-title">{content.title}</h1>
+      {content.intro && <p className="guide-intro">{content.intro}</p>}
+      {content.items.map((m, i) => {
+        const url = imageUrl(m.imageIndex);
+        return (
+          <section key={i} className={`mouth-item${url ? " with-image" : ""}`}>
+            {url && <img src={url} alt="" onError={(e) => (e.currentTarget.style.display = "none")} />}
+            <div>
+              <h2>
+                <span className="mouth-num">{i + 1}</span>
+                {m.heading}
+              </h2>
+              <p>{m.explanation}</p>
+            </div>
+          </section>
+        );
+      })}
+      {content.summary && <p className="mouth-summary">{content.summary}</p>}
+      <footer className="paper-footer">{contactLine(brand)}</footer>
+    </article>
+  );
+}
+
+export function CardsPaper({ brand, content }: { brand: BrandSettings; content: CardsContent }) {
+  const section = (title: string, items: string[]) =>
+    items.length > 0 && (
+      <div>
+        <h3>{title}</h3>
+        <ul>
+          {items.map((x, i) => (
+            <li key={i}>{x}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  return (
+    <div className="care-cards" style={brandStyle(brand)}>
+      {content.cards.map((c, i) => (
+        <article key={i} className="care-card">
+          <header>
+            <span>{brand.displayName}</span>
+            {brand.logo ? <img src={api.logoUrl(brand.logo)} alt="" /> : brand.practiceName && <span>{brand.practiceName}</span>}
+          </header>
+          <h2>{c.visit}</h2>
+          {section("Before your visit", c.before)}
+          {section("After your visit", c.after)}
+          {section(brand.phone ? `Call us on ${brand.phone} if` : "Call us if", c.callUsIf)}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+export function FaqPaper({ brand, content }: { brand: BrandSettings; content: FaqContent }) {
+  return (
+    <article className="paper guide" style={brandStyle(brand)}>
+      <header className="guide-head">
+        <BrandMark brand={brand} />
+      </header>
+      <h1 className="guide-title">{content.title}</h1>
+      {content.items.map((q, i) => (
+        <section key={i} className="guide-section faq">
+          <h2>{q.question}</h2>
+          <p>{q.answer}</p>
+        </section>
+      ))}
+      <p className="guide-intro">Anything else you'd like to know? Just ask us{brand.phone ? ` on ${brand.phone}` : ""}.</p>
+      <footer className="paper-footer">{contactLine(brand)}</footer>
+    </article>
   );
 }

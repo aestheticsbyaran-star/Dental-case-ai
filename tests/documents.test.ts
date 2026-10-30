@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DOCUMENT_SCHEMAS, buildDocumentText, documentImages, documentSystemPrompt } from "../server/documents";
+import { DOCUMENT_SCHEMAS, buildDocumentText, documentImages, documentSystemPrompt, dropMissingImages } from "../server/documents";
 import { defaultBrand, emptyDetails, type Analysis, type Case, type CaseRecord } from "../shared/types";
 
 const record = (over: Partial<CaseRecord>): CaseRecord => ({
@@ -91,6 +91,21 @@ describe("patient documents", () => {
     const ok = { title: "t", treatment: "x", teeth: "36", benefits: [], risks: [{ risk: "Infection", detail: "uncommon" }], alternatives: [], noTreatment: "", aftercare: [], cost: "[fee]" };
     expect(DOCUMENT_SCHEMAS.consent.safeParse(ok).success).toBe(true);
     expect(DOCUMENT_SCHEMAS.consent.safeParse({ ...ok, risks: ["Infection"] }).success).toBe(false);
+  });
+
+  it("keeps fees out of the journey, mouth, card and FAQ documents", () => {
+    for (const kind of ["timeline", "mouth", "cards", "faqs"] as const) {
+      expect(documentSystemPrompt(kind, defaultBrand())).toContain("Do not mention fees or costs at all");
+    }
+    expect(documentSystemPrompt("letter", defaultBrand())).not.toContain("Do not mention fees or costs at all");
+  });
+
+  it("gives Your mouth today the numbered image list and drops image numbers that don't exist", () => {
+    const text = buildDocumentText(c, analysis, "mouth", "", "", documentImages(c));
+    expect(text).toContain("0. OPG (radiograph, opg)");
+    const content = { title: "", intro: "", summary: "", items: [{ heading: "a", explanation: "", imageIndex: 3 }, { heading: "b", explanation: "", imageIndex: 9 }] };
+    dropMissingImages(content, 4);
+    expect(content.items.map((i) => i.imageIndex)).toEqual([3, null]);
   });
 
   it("rejects edited content of the wrong shape", () => {

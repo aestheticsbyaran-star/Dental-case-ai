@@ -34,7 +34,7 @@ import {
   saveBrand,
 } from "./store.js";
 import { MODEL, analysisModel, runAnalysis } from "./analyse.js";
-import { DOCUMENT_SCHEMAS, documentImages, writeDocument } from "./documents.js";
+import { DOCUMENT_SCHEMAS, IMAGE_KINDS, documentImages, dropMissingImages, writeDocument } from "./documents.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const app = express();
@@ -48,7 +48,7 @@ const upload = multer({
 
 const RECORD_KINDS: RecordKind[] = ["photo", "radiograph", "dicom", "cbct", "scan", "document"];
 const VERDICTS: ReviewVerdict[] = ["pending", "agreed", "partly-agreed", "disagreed"];
-const DOCUMENT_KINDS: DocumentKind[] = ["letter", "records", "guide", "presentation", "consent"];
+const DOCUMENT_KINDS: DocumentKind[] = ["letter", "records", "guide", "presentation", "consent", "timeline", "mouth", "cards", "faqs"];
 const BRAND_TEXT_FIELDS: (keyof BrandSettings)[] = [
   "displayName",
   "qualifications",
@@ -424,7 +424,7 @@ app.put(
   }),
 );
 
-// Write a letter, records note, guide, presentation or consent form from an analysis.
+// Write a patient document or records note from an analysis.
 app.post(
   "/api/cases/:id/documents",
   wrap(async (req, res) => {
@@ -440,7 +440,7 @@ app.post(
     if (!analysis || analysis.status !== "complete") return res.status(400).json({ error: "Choose a completed analysis first." });
     const optionTitle = String(body.optionTitle ?? "").slice(0, 300);
     const instructions = String(body.instructions ?? "").slice(0, 4000);
-    const images = kind === "presentation" ? documentImages(c) : undefined;
+    const images = IMAGE_KINDS.includes(kind) ? documentImages(c) : undefined;
 
     const now = new Date().toISOString();
     const doc: PatientDocument = {
@@ -488,10 +488,7 @@ app.put(
       if (!d) throw new NotFoundError("Document not found");
       const parsed = DOCUMENT_SCHEMAS[d.kind].safeParse(req.body?.content);
       if (!parsed.success) return null;
-      if ("slides" in parsed.data) {
-        const count = d.images?.length ?? 0;
-        for (const s of parsed.data.slides) if (s.imageIndex !== null && !(s.imageIndex >= 0 && s.imageIndex < count)) s.imageIndex = null;
-      }
+      dropMissingImages(parsed.data, d.images?.length ?? 0);
       d.content = parsed.data;
       d.updatedAt = new Date().toISOString();
       return d;

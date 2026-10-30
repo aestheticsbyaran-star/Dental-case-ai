@@ -43,6 +43,27 @@ export const DOCUMENT_SCHEMAS = {
     aftercare: z.array(z.string()),
     cost: z.string(),
   }),
+  timeline: z.object({
+    title: z.string(),
+    intro: z.string(),
+    visits: z.array(
+      z.object({ name: z.string(), when: z.string(), duration: z.string(), whatHappens: z.string(), howYouFeel: z.string() }),
+    ),
+    closing: z.string(),
+  }),
+  mouth: z.object({
+    title: z.string(),
+    intro: z.string(),
+    items: z.array(z.object({ imageIndex: z.number().int().nullable(), heading: z.string(), explanation: z.string() })),
+    summary: z.string(),
+  }),
+  cards: z.object({
+    cards: z.array(z.object({ visit: z.string(), before: z.array(z.string()), after: z.array(z.string()), callUsIf: z.array(z.string()) })),
+  }),
+  faqs: z.object({
+    title: z.string(),
+    items: z.array(z.object({ question: z.string(), answer: z.string() })),
+  }),
 } satisfies { [K in DocumentKind]: z.ZodType<DocumentContentMap[K]> };
 
 export const DOCUMENT_LABELS: Record<DocumentKind, string> = {
@@ -51,7 +72,16 @@ export const DOCUMENT_LABELS: Record<DocumentKind, string> = {
   guide: "Treatment plan guide",
   presentation: "Patient presentation",
   consent: "Consent form",
+  timeline: "Treatment journey",
+  mouth: "Your mouth today",
+  cards: "Before and aftercare cards",
+  faqs: "Treatment FAQs",
 };
+
+/** Document types that show case images and so get a numbered image list. */
+export const IMAGE_KINDS: DocumentKind[] = ["presentation", "mouth"];
+
+const NO_FEES = "\n- Do not mention fees or costs at all; the dentist sends those separately.";
 
 const COMMON_RULES = `Ground rules:
 - The dentist's final plan (if given) and the chosen treatment option are the authority. Follow them, and do not recommend something different.
@@ -62,6 +92,22 @@ const COMMON_RULES = `Ground rules:
 - For patient-facing documents, follow GDC and Montgomery consent principles: explain what is involved, the benefits, the material risks, the reasonable alternatives (including no treatment and its likely consequences), costs and what happens next, in plain language a patient can follow. Describe teeth in words with the FDI number in brackets, e.g. "lower left first molar (36)".`;
 
 const KIND_PROMPTS: Record<DocumentKind, string> = {
+  timeline: `Write a treatment journey timeline: a visual roadmap the patient can follow, one step per appointment (and healing periods between them where relevant), from the next visit to the final review and ongoing maintenance.
+- title: e.g. "Your treatment journey".
+- intro: 1 to 2 sentences.
+- visits: one entry per appointment or stage, in order. name is a short label ("Implant placement"), when is roughly when ("Visit 1", "About 3 months later"; never a calendar date), duration is roughly how long the appointment takes ("about 90 minutes", or "" for a healing period), whatHappens is 1 to 3 plain sentences, howYouFeel is honest and reassuring: what it feels like during and in the days after.
+- closing: one sentence about looking after the result long term.${NO_FEES}`,
+  mouth: `Write "Your mouth today": a friendly explanation of what the dentist found, built around the patient's own photos and radiographs, so they can see the problem for themselves.
+- title: e.g. "Your mouth today".
+- intro: 1 to 2 sentences.
+- items: 3 to 8 points. Each has a heading (a short, simple label, e.g. "The gap at the back on the lower left"), an explanation in 1 to 3 plain sentences (what it is, why it matters, how it relates to the plan), and imageIndex, the number of the case image that shows it best, or null. Prefer clear images such as the OPG or a relevant photo. Only describe findings the dentist has recorded or confirmed, and include things that are healthy too, so it is balanced.
+- summary: 1 to 2 sentences linking what was found to the recommended treatment.${NO_FEES}`,
+  cards: `Write before-visit and aftercare cards: one short card per appointment in the treatment plan, the kind a patient keeps on the fridge.
+- cards: one entry per appointment, in order. visit names it ("Visit 1: implant placement"). before: 2 to 5 short instructions for the day or days before (eating, medication to take or check with the dentist, arranging a lift if sedated, what to bring). after: 3 to 7 short instructions for the hours and days after (eating, pain relief, cleaning, rinsing, activity, smoking, what is normal). callUsIf: 2 to 4 warning signs to call the practice about (e.g. bleeding that will not stop, swelling getting worse after 3 days, fever).
+- Keep each instruction under 15 words. Base medication advice on the medical history, and do not tell the patient to stop any prescribed medication; tell them to check with the dentist instead.${NO_FEES}`,
+  faqs: `Write frequently asked questions about this patient's treatment: the real worries patients have, answered honestly and reassuringly.
+- title: e.g. "Your questions about dental implants".
+- items: 8 to 12 questions and answers. Cover pain and numbness, how long each visit and the whole treatment takes, time off work, eating and speaking afterwards, how long the result lasts, how it is looked after, what happens if something goes wrong, and anything specific to this patient's goals or history. Answers are 2 to 4 sentences.${NO_FEES}`,
   consent: `Write the treatment-specific part of a written consent form for the treatment being planned, for the patient to read and sign. The app adds the standard declarations (explained, questions answered, costs given, can withdraw at any time) and the signature boxes, so do not write those.
 - title: e.g. "Consent for a dental implant to replace the lower left first molar (36)".
 - treatment: what the treatment involves, step by step in plain language, in 3 to 6 sentences, including the number of visits and any anaesthetic or sedation planned.
@@ -183,9 +229,9 @@ export function buildDocumentText(
   lines.push("", `Dentist's final plan:\n${analysis.review.finalPlan.trim() || "not written yet"}`);
   lines.push("", `Treatment option to write about: ${optionTitle || "the dentist's final plan above"}`);
 
-  if (kind === "presentation") {
-    lines.push("", "Case images available for slides (use the number as imageIndex):");
-    if (images.length === 0) lines.push("none (use null for every slide)");
+  if (IMAGE_KINDS.includes(kind)) {
+    lines.push("", "Case images available (use the number as imageIndex):");
+    if (images.length === 0) lines.push("none (use null throughout)");
     images.forEach((img, i) => lines.push(`${i}. ${img.label}`));
   }
 
@@ -216,10 +262,12 @@ export async function writeDocument(
   const content = response.parsed_output;
   if (!content) throw new Error("Claude's answer could not be read as a document.");
 
-  if ("slides" in content) {
-    for (const s of content.slides) {
-      if (s.imageIndex !== null && !(s.imageIndex >= 0 && s.imageIndex < images.length)) s.imageIndex = null;
-    }
-  }
+  dropMissingImages(content, images.length);
   return { content, usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens } };
+}
+
+/** Clears image numbers that don't point at an offered image. */
+export function dropMissingImages(content: AnyContent, count: number): void {
+  const withImages = "slides" in content ? content.slides : "items" in content && "summary" in content ? content.items : [];
+  for (const x of withImages) if (x.imageIndex !== null && !(x.imageIndex >= 0 && x.imageIndex < count)) x.imageIndex = null;
 }
