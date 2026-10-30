@@ -1,10 +1,11 @@
 // File-based case storage. Everything lives under DATA_DIR on this computer:
 //   data/cases/<caseId>/case.json
 //   data/cases/<caseId>/files/<storedName>
+//   data/settings.json and data/brand/<logo>
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { type Case, emptyDetails } from "../shared/types.js";
+import { type BrandSettings, type Case, defaultBrand, emptyDetails } from "../shared/types.js";
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? "./data");
 const CASES_DIR = path.join(DATA_DIR, "cases");
@@ -97,4 +98,29 @@ export async function withCase<T>(caseId: string, fn: (c: Case) => Promise<T> | 
   } finally {
     if (locks.get(caseId) === run) locks.delete(caseId);
   }
+}
+
+const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
+export const BRAND_DIR = path.join(DATA_DIR, "brand");
+
+export async function getBrand(): Promise<BrandSettings> {
+  try {
+    return { ...defaultBrand(), ...JSON.parse(await fs.readFile(SETTINGS_FILE, "utf8")).brand };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return defaultBrand();
+    throw err;
+  }
+}
+
+export async function saveBrand(brand: BrandSettings): Promise<BrandSettings> {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const tmp = `${SETTINGS_FILE}.${randomUUID()}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify({ brand }, null, 2));
+  await fs.rename(tmp, SETTINGS_FILE);
+  return brand;
+}
+
+export function brandFilePath(storedName: string): string {
+  if (!/^logo-[a-f0-9-]{36}\.(png|jpg|webp)$/.test(storedName)) throw new NotFoundError("Unknown file");
+  return path.join(BRAND_DIR, storedName);
 }

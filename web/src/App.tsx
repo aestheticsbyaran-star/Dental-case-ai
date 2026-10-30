@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type CaseSummary, type Status } from "./lib/api";
 import { CaseView } from "./components/CaseView";
+import { SettingsPage } from "./components/SettingsPage";
+import { Logo, useBrand } from "./lib/brand";
 
-function useHashCaseId(): [string | null, (id: string | null) => void] {
+/** The hash holds either "case-<id>" or "settings". */
+function useHashRoute(): [string | null, (route: string | null) => void] {
   const read = () => {
+    if (location.hash === "#settings") return "settings";
     const m = location.hash.match(/^#case-([a-f0-9-]{36})$/);
     return m ? m[1] : null;
   };
@@ -14,14 +18,15 @@ function useHashCaseId(): [string | null, (id: string | null) => void] {
     return () => removeEventListener("hashchange", onHash);
   }, []);
   const go = useCallback((next: string | null) => {
-    location.hash = next ? `case-${next}` : "";
+    location.hash = next === "settings" ? "settings" : next ? `case-${next}` : "";
   }, []);
   return [id, go];
 }
 
 export function App() {
   const [status, setStatus] = useState<Status | null>(null);
-  const [caseId, openCase] = useHashCaseId();
+  const [route, go] = useHashRoute();
+  const { brand } = useBrand();
 
   useEffect(() => {
     api.status().then(setStatus).catch(() => setStatus(null));
@@ -30,17 +35,18 @@ export function App() {
   return (
     <div className="shell">
       <header className="topbar">
-        <div className="brand">
-          <h1>
-            <a href="#" style={{ color: "inherit", textDecoration: "none" }}>
-              Case workspace
-            </a>
-          </h1>
-          <small>personal tool · records stay on this computer</small>
-        </div>
-        <a className="small" href="/api/review-log.csv">
-          Download review log (CSV)
+        <a className="brand" href="#">
+          <Logo className="brand-logo" />
+          <span className="brand-text">
+            <span className="brand-name">{brand.displayName || "Case workspace"}</span>
+            <small>{brand.practiceName ? `${brand.practiceName} · ` : ""}Case workspace · records stay on this computer</small>
+          </span>
         </a>
+        <nav className="row small">
+          <a href="#">Cases</a>
+          <a href="#settings">Practice settings</a>
+          <a href="/api/review-log.csv">Review log (CSV)</a>
+        </nav>
       </header>
 
       {status && !status.apiKeyConfigured && (
@@ -50,7 +56,13 @@ export function App() {
         </div>
       )}
 
-      {caseId ? <CaseView caseId={caseId} onClose={() => openCase(null)} /> : <CaseList onOpen={openCase} />}
+      {route === "settings" ? (
+        <SettingsPage />
+      ) : route ? (
+        <CaseView caseId={route} onClose={() => go(null)} />
+      ) : (
+        <CaseList onOpen={go} />
+      )}
     </div>
   );
 }

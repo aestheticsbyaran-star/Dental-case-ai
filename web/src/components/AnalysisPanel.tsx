@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Analysis, AnalysisReview, Case, FindingBasis, ReviewVerdict } from "../../../shared/types";
+import { analysisText } from "../lib/analysisText";
 import { MAX_IMAGES } from "../../../shared/imageBudget";
 import { api } from "../lib/api";
 
@@ -16,7 +17,7 @@ const VERDICT_LABEL: Record<ReviewVerdict, string> = {
   disagreed: "Disagreed",
 };
 
-export function AnalysisPanel({ c, onChange }: { c: Case; onChange: () => void }) {
+export function AnalysisPanel({ c, onChange, onWriteDocuments }: { c: Case; onChange: () => void; onWriteDocuments: () => void }) {
   const [question, setQuestion] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,12 +99,13 @@ export function AnalysisPanel({ c, onChange }: { c: Case; onChange: () => void }
         </section>
       )}
 
-      {selected && <AnalysisView key={selected.id} caseId={c.id} a={selected} onChange={onChange} />}
+      {selected && <AnalysisView key={selected.id} c={c} a={selected} onChange={onChange} onWriteDocuments={onWriteDocuments} />}
     </div>
   );
 }
 
-function AnalysisView({ caseId, a, onChange }: { caseId: string; a: Analysis; onChange: () => void }) {
+function AnalysisView({ c, a, onChange, onWriteDocuments }: { c: Case; a: Analysis; onChange: () => void; onWriteDocuments: () => void }) {
+  const [copied, setCopied] = useState(false);
   if (a.status === "failed" || !a.output) {
     return <div className="error">This analysis failed: {a.error}</div>;
   }
@@ -120,6 +122,19 @@ function AnalysisView({ caseId, a, onChange }: { caseId: string; a: Analysis; on
         </div>
         <p>{o.caseSummary}</p>
         <p className="small muted">AI-generated for your review. Check every finding against the records before relying on it.</p>
+        <div className="row">
+          <button
+            onClick={() =>
+              navigator.clipboard.writeText(analysisText(c, a)).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              })
+            }
+          >
+            {copied ? "Copied" : "Copy analysis as text"}
+          </button>
+          <button onClick={onWriteDocuments}>Write letters, notes and presentations →</button>
+        </div>
       </section>
 
       {o.risksAndFlags.length > 0 && (
@@ -192,7 +207,7 @@ function AnalysisView({ caseId, a, onChange }: { caseId: string; a: Analysis; on
         </section>
       </div>
 
-      <ReviewForm caseId={caseId} a={a} onChange={onChange} />
+      <ReviewForm caseId={c.id} a={a} onChange={onChange} />
     </div>
   );
 }

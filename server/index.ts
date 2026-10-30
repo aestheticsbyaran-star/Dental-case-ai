@@ -6,7 +6,18 @@ import { randomUUID } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 import multer from "multer";
 import Anthropic from "@anthropic-ai/sdk";
-import type { Analysis, CaseDetails, CaseRecord, Measurement, RecordKind, ReviewVerdict, VolumeInfo } from "../shared/types.js";
+import type {
+  Analysis,
+  BrandSettings,
+  CaseDetails,
+  CaseRecord,
+  DocumentKind,
+  Measurement,
+  PatientDocument,
+  RecordKind,
+  ReviewVerdict,
+  VolumeInfo,
+} from "../shared/types.js";
 import {
   NotFoundError,
   createCase,
@@ -17,8 +28,13 @@ import {
   listCases,
   withCase,
   DATA_DIR,
+  BRAND_DIR,
+  brandFilePath,
+  getBrand,
+  saveBrand,
 } from "./store.js";
 import { MODEL, runAnalysis } from "./analyse.js";
+import { DOCUMENT_SCHEMAS, documentImages, writeDocument } from "./documents.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const app = express();
@@ -32,6 +48,20 @@ const upload = multer({
 
 const RECORD_KINDS: RecordKind[] = ["photo", "radiograph", "dicom", "cbct", "scan", "document"];
 const VERDICTS: ReviewVerdict[] = ["pending", "agreed", "partly-agreed", "disagreed"];
+const DOCUMENT_KINDS: DocumentKind[] = ["letter", "records", "guide", "presentation"];
+const BRAND_TEXT_FIELDS: (keyof BrandSettings)[] = [
+  "displayName",
+  "qualifications",
+  "gdcNumber",
+  "practiceName",
+  "address",
+  "phone",
+  "email",
+  "website",
+  "signOff",
+  "writingStyle",
+];
+const LOGO_TYPES: Record<string, string> = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp" };
 
 function extOf(name: string): string {
   const ext = path.extname(name).toLowerCase().replace(/[^.a-z0-9]/g, "");
@@ -66,6 +96,57 @@ const param = (req: Request, name: string): string => String(req.params[name]);
 app.get("/api/status", (_req, res) => {
   res.json({ apiKeyConfigured: Boolean(process.env.ANTHROPIC_API_KEY), model: MODEL, dataDir: DATA_DIR });
 });
+
+app.get("/api/settings", wrap(async (_req, res) => res.json(await getBrand())));
+
+app.put(
+  "/api/settings",
+  wrap(async (req, res) => {
+    const body = req.body ?? {};
+    const brand = await getBrand();
+    for (const f of BRAND_TEXT_FIELDS) {
+      if (typeof body[f] === "string") (brand[f] as string) = body[f].slice(0, f === "writingStyle" ? 8000 : 300);
+    }
+    if (typeof body.brandColour === "string" && /^#[0-9a-f]{6}$/i.test(body.brandColour)) brand.brandColour = body.brandColour;
+    res.json(await saveBrand(brand));
+  }),
+);
+
+app.post(
+  "/api/settings/logo",
+  upload.single("logo"),
+  wrap(async (req, res) => {
+    const ext = req.file && LOGO_TYPES[req.file.mimetype];
+    if (!req.file || !ext) return res.status(400).json({ error: "The logo must be a PNG, JPEG or WebP image." });
+    if (req.file.size > 5 * 1024 * 1024) return res.status(400).json({ error: "The logo must be under 5 MB." });
+    const brand = await getBrand();
+    const stored = `logo-${randomUUID()}${ext}`;
+    await fs.mkdir(BRAND_DIR, { recursive: true });
+    await fs.writeFile(brandFilePath(stored), req.file.buffer);
+    if (brand.logo) await fs.rm(brandFilePath(brand.logo), { force: true });
+    brand.logo = stored;
+    res.json(await saveBrand(brand));
+  }),
+);
+
+app.delete(
+  "/api/settings/logo",
+  wrap(async (_req, res) => {
+    const brand = await getBrand();
+    if (brand.logo) await fs.rm(brandFilePath(brand.logo), { force: true });
+    delete brand.logo;
+    res.json(await saveBrand(brand));
+  }),
+);
+
+app.get(
+  "/api/brand/:name",
+  wrap(async (req, res) => {
+    res.sendFile(brandFilePath(param(req, "name")), { headers: { "Cache-Control": "private, max-age=86400" } }, (err) => {
+      if (err && !res.headersSent) res.status(404).json({ error: "File not found" });
+    });
+  }),
+);
 
 app.get(
   "/api/cases",
@@ -339,6 +420,95 @@ app.put(
       return a;
     });
     res.json(analysis);
+  }),
+);
+
+// Write a letter, records note, guide or presentation from an analysis.
+app.post(
+  "/api/cases/:id/documents",
+  wrap(async (req, res) => {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(400).json({ error: "No Claude API key is set. Add ANTHROPIC_API_KEY to the .env file and restart." });
+    }
+    const body = req.body ?? {};
+    const kind = body.kind as DocumentKind;
+    if (!DOCUMENT_KINDS.includes(kind)) return res.status(400).json({ error: "Unknown document type." });
+    const caseId = param(req, "id");
+    const c = await getCase(caseId);
+    const analysis = c.analyses.find((a) => a.id === body.analysisId);
+    if (!analysis || analysis.status !== "complete") return res.status(400).json({ error: "Choose a completed analysis first." });
+    const optionTitle = String(body.optionTitle ?? "").slice(0, 300);
+    const instructions = String(body.instructions ?? "").slice(0, 4000);
+    const images = kind === "presentation" ? documentImages(c) : undefined;
+
+    const now = new Date().toISOString();
+    const doc: PatientDocument = {
+      id: randomUUID(),
+      kind,
+      createdAt: now,
+      updatedAt: now,
+      analysisId: analysis.id,
+      optionTitle,
+      instructions,
+      model: MODEL,
+      status: "complete",
+      images,
+    };
+    try {
+      const result = await writeDocument(new Anthropic(), {
+        c,
+        analysis,
+        kind,
+        optionTitle,
+        instructions,
+        brand: await getBrand(),
+        images: images ?? [],
+      });
+      doc.content = result.content;
+      doc.usage = result.usage;
+    } catch (err) {
+      doc.status = "failed";
+      doc.error = err instanceof Anthropic.APIError ? `Claude API error ${err.status ?? ""}: ${err.message}` : String((err as Error).message ?? err);
+      console.error("Document failed:", err);
+    }
+    await withCase(caseId, (fresh) => {
+      fresh.documents = [doc, ...(fresh.documents ?? [])];
+    });
+    res.status(doc.status === "complete" ? 201 : 502).json(doc);
+  }),
+);
+
+// Save the dentist's edits to a document.
+app.put(
+  "/api/cases/:id/documents/:docId",
+  wrap(async (req, res) => {
+    const doc = await withCase(param(req, "id"), (c) => {
+      const d = c.documents?.find((x) => x.id === param(req, "docId"));
+      if (!d) throw new NotFoundError("Document not found");
+      const parsed = DOCUMENT_SCHEMAS[d.kind].safeParse(req.body?.content);
+      if (!parsed.success) return null;
+      if ("slides" in parsed.data) {
+        const count = d.images?.length ?? 0;
+        for (const s of parsed.data.slides) if (s.imageIndex !== null && !(s.imageIndex >= 0 && s.imageIndex < count)) s.imageIndex = null;
+      }
+      d.content = parsed.data;
+      d.updatedAt = new Date().toISOString();
+      return d;
+    });
+    if (!doc) return res.status(400).json({ error: "The document could not be saved because its contents were not valid." });
+    res.json(doc);
+  }),
+);
+
+app.delete(
+  "/api/cases/:id/documents/:docId",
+  wrap(async (req, res) => {
+    await withCase(param(req, "id"), (c) => {
+      const before = c.documents?.length ?? 0;
+      c.documents = (c.documents ?? []).filter((x) => x.id !== param(req, "docId"));
+      if (c.documents.length === before) throw new NotFoundError("Document not found");
+    });
+    res.status(204).end();
   }),
 );
 
