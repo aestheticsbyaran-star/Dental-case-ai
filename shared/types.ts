@@ -182,7 +182,7 @@ export interface Analysis {
   review: AnalysisReview;
 }
 
-export type DocumentKind = "letter" | "records" | "guide" | "presentation";
+export type DocumentKind = "letter" | "records" | "guide" | "presentation" | "consent" | "timeline" | "mouth" | "cards" | "faqs";
 
 export interface LetterContent {
   subject: string;
@@ -221,11 +221,87 @@ export interface PresentationContent {
   slides: Slide[];
 }
 
+export interface ConsentRisk {
+  risk: string;
+  detail: string;
+}
+
+export interface ConsentAlternative {
+  option: string;
+  summary: string;
+}
+
+/** A treatment-specific consent form. The standard declarations and signature boxes come from the template. */
+export interface ConsentContent {
+  title: string;
+  /** What the proposed treatment involves, in plain language. */
+  treatment: string;
+  teeth: string;
+  benefits: string[];
+  risks: ConsentRisk[];
+  alternatives: ConsentAlternative[];
+  /** Likely consequences of having no treatment. */
+  noTreatment: string;
+  aftercare: string[];
+  cost: string;
+}
+
+export interface TimelineVisit {
+  name: string;
+  /** Roughly when, e.g. "Week 1" or "About 3 months later". */
+  when: string;
+  duration: string;
+  whatHappens: string;
+  howYouFeel: string;
+}
+
+export interface TimelineContent {
+  title: string;
+  intro: string;
+  visits: TimelineVisit[];
+  closing: string;
+}
+
+export interface MouthItem {
+  /** Index into the case images offered, or null for a text-only point. */
+  imageIndex: number | null;
+  heading: string;
+  explanation: string;
+}
+
+export interface MouthContent {
+  title: string;
+  intro: string;
+  items: MouthItem[];
+  summary: string;
+}
+
+export interface CareCard {
+  visit: string;
+  before: string[];
+  after: string[];
+  callUsIf: string[];
+}
+
+export interface CardsContent {
+  cards: CareCard[];
+}
+
+export interface FaqContent {
+  title: string;
+  items: { question: string; answer: string }[];
+}
+
 export interface DocumentContentMap {
   letter: LetterContent;
   records: RecordsContent;
   guide: GuideContent;
   presentation: PresentationContent;
+  consent: ConsentContent;
+  timeline: TimelineContent;
+  mouth: MouthContent;
+  cards: CardsContent;
+  faqs: FaqContent;
 }
 
 /** A preview image a presentation can show: the record and which of its previews. */
@@ -247,7 +323,7 @@ export interface PatientDocument<K extends DocumentKind = DocumentKind> {
   model: string;
   status: "complete" | "failed";
   content?: DocumentContentMap[K];
-  /** Images offered to Claude for a presentation, in the order imageIndex refers to. */
+  /** Images offered to Claude for a presentation or "Your mouth today", in the order imageIndex refers to. */
   images?: DocumentImage[];
   error?: string;
   usage?: { inputTokens: number; outputTokens: number };
