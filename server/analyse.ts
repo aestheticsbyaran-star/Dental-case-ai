@@ -2,13 +2,15 @@
 import { promises as fs } from "node:fs";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import sharp from "sharp";
 import { z } from "zod";
+import { selectImages } from "../shared/imageBudget.js";
 import type { AnalysisOutput, Case, CaseRecord } from "../shared/types.js";
 import { filePath } from "./store.js";
 
 export const MODEL = "claude-opus-5-5";
-/** Keeps requests a sensible size; the dentist picks which records to include. */
-export const MAX_IMAGES = 24;
+/** Claude scales images down to about this long edge anyway; above 20 images the API rejects any over 2000 px. */
+const AI_MAX_EDGE = 1568;
 
 const AnalysisSchema = z.object({
   caseSummary: z.string(),
@@ -59,7 +61,7 @@ What to produce:
 - missingInformation: records or tests that would change the plan (e.g. sensibility testing, periodontal charting, a CBCT for a specific site).
 - suggestedNextSteps: practical steps before the treatment-planning appointment.`;
 
-export function buildCaseText(c: Case, records: CaseRecord[], question: string): string {
+export function buildCaseText(c: Case, records: CaseRecord[], question: string, sentCounts?: number[]): string {
   const d = c.details;
   const lines: string[] = [
     `Case reference: ${d.reference || "(none)"}`,
@@ -88,8 +90,14 @@ export function buildCaseText(c: Case, records: CaseRecord[], question: string):
           : r.mmPerPixel
           ? `calibrated, ${r.mmPerPixel.toFixed(4)} mm/pixel from ${r.calibrationSource}`
           : "not calibrated";
-    lines.push(`${i + 1}. [${r.kind}${view}] "${r.caption || r.originalName}" - ${r.previews.length} image(s), ${calib}`);
+    const sent = sentCounts?.[i] ?? r.previews.length;
+    const images = sent === r.previews.length ? `${sent} image(s)` : `${sent} of ${r.previews.length} images sent`;
+    lines.push(`${i + 1}. [${r.kind}${view}] "${r.caption || r.originalName}" - ${images}, ${calib}`);
   });
+  const omitted = records.reduce((n, r, i) => n + r.previews.length - (sentCounts?.[i] ?? r.previews.length), 0);
+  if (omitted > 0) {
+    lines.push(`(${omitted} further image(s) were left out to keep within the per-analysis limit; mention it if they would matter.)`);
+  }
 
   const measured = records.flatMap((r) => r.measurements.map((m) => ({ r, m })));
   lines.push("", "Clinician measurements:");
@@ -105,29 +113,34 @@ export function buildCaseText(c: Case, records: CaseRecord[], question: string):
   return lines.join("\n");
 }
 
-function mediaType(name: string): "image/png" | "image/jpeg" {
-  return name.endsWith(".png") ? "image/png" : "image/jpeg";
+/** Scales an image down for Claude. Stored previews stay full size for measuring. */
+export async function imageForAi(data: Buffer): Promise<Buffer> {
+  return sharp(data)
+    .resize({ width: AI_MAX_EDGE, height: AI_MAX_EDGE, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 88 })
+    .toBuffer();
 }
 
 export async function buildMessageContent(
   c: Case,
   records: CaseRecord[],
   question: string,
-): Promise<{ content: Anthropic.ContentBlockParam[]; imageCount: number }> {
+): Promise<{ content: Anthropic.ContentBlockParam[]; imageCount: number; omittedImageCount: number }> {
   const content: Anthropic.ContentBlockParam[] = [];
-  let imageCount = 0;
-  for (const r of records) {
-    for (const [i, preview] of r.previews.entries()) {
-      if (imageCount >= MAX_IMAGES) break;
-      const data = await fs.readFile(filePath(c.id, preview));
-      const label = r.previewLabels?.[i] ? ` - ${r.previewLabels[i]}` : "";
-      content.push({ type: "text", text: `Image from "${r.caption || r.originalName}" (${r.kind}${r.view ? `, ${r.view}` : ""})${label}:` });
-      content.push({ type: "image", source: { type: "base64", media_type: mediaType(preview), data: data.toString("base64") } });
-      imageCount++;
-    }
+  const choices = selectImages(records);
+  const sentCounts = records.map(() => 0);
+  for (const { recordIndex, previewIndex } of choices) {
+    const r = records[recordIndex];
+    const preview = r.previews[previewIndex];
+    const data = await imageForAi(await fs.readFile(filePath(c.id, preview)));
+    const label = r.previewLabels?.[previewIndex] ? ` - ${r.previewLabels[previewIndex]}` : "";
+    content.push({ type: "text", text: `Image from "${r.caption || r.originalName}" (${r.kind}${r.view ? `, ${r.view}` : ""})${label}:` });
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: data.toString("base64") } });
+    sentCounts[recordIndex]++;
   }
-  content.push({ type: "text", text: buildCaseText(c, records, question) });
-  return { content, imageCount };
+  content.push({ type: "text", text: buildCaseText(c, records, question, sentCounts) });
+  const total = records.reduce((n, r) => n + r.previews.length, 0);
+  return { content, imageCount: choices.length, omittedImageCount: total - choices.length };
 }
 
 export async function runAnalysis(
@@ -135,8 +148,8 @@ export async function runAnalysis(
   c: Case,
   records: CaseRecord[],
   question: string,
-): Promise<{ output: AnalysisOutput; imageCount: number; usage: { inputTokens: number; outputTokens: number } }> {
-  const { content, imageCount } = await buildMessageContent(c, records, question);
+): Promise<{ output: AnalysisOutput; imageCount: number; omittedImageCount: number; usage: { inputTokens: number; outputTokens: number } }> {
+  const { content, imageCount, omittedImageCount } = await buildMessageContent(c, records, question);
   const response = await client.messages.parse({
     model: MODEL,
     max_tokens: 16000,
@@ -156,6 +169,7 @@ export async function runAnalysis(
   return {
     output: response.parsed_output,
     imageCount,
+    omittedImageCount,
     usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
   };
 }

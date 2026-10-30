@@ -129,7 +129,7 @@ export interface Analysis {
   model: string;
   question: string;
   /** What was sent: record ids, number of images, and measurement count. */
-  inputSummary: { recordIds: string[]; imageCount: number; measurementCount: number };
+  inputSummary: { recordIds: string[]; imageCount: number; measurementCount: number; omittedImageCount?: number };
   status: "complete" | "failed";
   output?: AnalysisOutput;
   error?: string;
