@@ -104,10 +104,53 @@ export interface TreatmentOption {
   advantages: string[];
   disadvantages: string[];
   prerequisites: string[];
+  /** Order of treatment, phase by phase. */
+  sequence?: string[];
+  prognosis?: string;
+  maintenance?: string;
 }
+
+export type Prognosis = "good" | "fair" | "questionable" | "poor" | "hopeless" | "not assessed";
+
+export interface RecordReview {
+  /** Record caption, e.g. "OPG" or "Upper occlusal photo". */
+  record: string;
+  observations: string[];
+}
+
+export interface ToothEntry {
+  tooth: string;
+  status: string;
+  prognosis: Prognosis;
+  notes: string;
+}
+
+export interface Assessment {
+  area: string;
+  assessment: string;
+}
+
+export interface Diagnosis {
+  diagnosis: string;
+  teeth: string;
+  rationale: string;
+  differentials: string[];
+}
+
+/** Claude models the dentist can choose for an analysis. */
+export const ANALYSIS_MODELS = {
+  "claude-opus-5-5": "Claude Opus 5.5 (standard)",
+  "claude-fable-5-1": "Claude Fable 5.1 (most capable, about 2.5x the cost)",
+} as const;
+export type AnalysisModel = keyof typeof ANALYSIS_MODELS;
 
 export interface AnalysisOutput {
   caseSummary: string;
+  /** Older analyses don't have the sections below. */
+  recordReviews?: RecordReview[];
+  assessments?: Assessment[];
+  toothChart?: ToothEntry[];
+  diagnoses?: Diagnosis[];
   findings: Finding[];
   treatmentOptions: TreatmentOption[];
   risksAndFlags: string[];

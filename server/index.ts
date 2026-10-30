@@ -33,7 +33,7 @@ import {
   getBrand,
   saveBrand,
 } from "./store.js";
-import { MODEL, runAnalysis } from "./analyse.js";
+import { MODEL, analysisModel, runAnalysis } from "./analyse.js";
 import { DOCUMENT_SCHEMAS, documentImages, writeDocument } from "./documents.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -372,11 +372,12 @@ app.post(
     const c = await getCase(caseId);
     const question = String(req.body?.question ?? "").slice(0, 4000);
     const records = c.records.filter((r) => r.includeInAnalysis);
+    const model = analysisModel(req.body?.model);
 
     const analysis: Analysis = {
       id: randomUUID(),
       createdAt: new Date().toISOString(),
-      model: MODEL,
+      model,
       question,
       inputSummary: {
         recordIds: records.map((r) => r.id),
@@ -387,7 +388,7 @@ app.post(
       review: { verdict: "pending", finalPlan: "", comments: "" },
     };
     try {
-      const result = await runAnalysis(new Anthropic(), c, records, question);
+      const result = await runAnalysis(new Anthropic(), c, records, question, model);
       analysis.output = result.output;
       analysis.usage = result.usage;
       analysis.inputSummary.imageCount = result.imageCount;

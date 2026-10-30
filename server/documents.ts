@@ -135,7 +135,12 @@ export function buildDocumentText(
   }
 
   if (o) {
-    lines.push("", "Case analysis (prepared for the dentist):", o.caseSummary, "", "Findings:");
+    lines.push("", "Case analysis (prepared for the dentist):", o.caseSummary);
+    if (o.diagnoses?.length) {
+      lines.push("", "Working diagnoses (AI, check against the dentist's notes and final plan):");
+      for (const d of o.diagnoses) lines.push(`- ${d.diagnosis}${d.teeth ? ` (${d.teeth})` : ""}`);
+    }
+    lines.push("", "Findings:");
     for (const f of o.findings) {
       const basis = f.basis === "visual-impression" ? "AI visual impression, unconfirmed" : f.basis === "clinician-measurement" ? "dentist's measurement" : "dentist's notes";
       lines.push(`- ${f.tooth ? `[${f.tooth}] ` : ""}${f.finding} (${basis})`);
@@ -143,6 +148,7 @@ export function buildDocumentText(
     lines.push("", "Treatment options:");
     o.treatmentOptions.forEach((t, i) => {
       lines.push(`${String.fromCharCode(65 + i)}. ${t.title}: ${t.description}`);
+      if (t.sequence?.length) lines.push(`   Sequence: ${t.sequence.join(" -> ")}`);
       if (t.advantages.length) lines.push(`   Advantages: ${t.advantages.join("; ")}`);
       if (t.disadvantages.length) lines.push(`   Disadvantages: ${t.disadvantages.join("; ")}`);
       if (t.prerequisites.length) lines.push(`   Before starting: ${t.prerequisites.join("; ")}`);
