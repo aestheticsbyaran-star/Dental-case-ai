@@ -44,7 +44,7 @@ Case files are saved in `./data` (change it with `DATA_DIR` in `.env`). Back tha
 
 For records ticked **Include in AI analysis**:
 
-- the de-identified preview images (photos, rendered radiographs, six scan views, CBCT overviews and the CBCT slices you chose), up to 24 per analysis
+- the de-identified preview images (photos, rendered radiographs, six scan views, CBCT overviews and the CBCT slices you chose), scaled to at most 1568 px, up to 40 per analysis. If a case has more, every record still sends its first image, photos and radiographs come next, and extra scan and CBCT views are left out first; the analysis shows how many were left out
 - the case reference, age, sex and the text fields from Details & notes
 - your measurements, with units and calibration source
 - your question

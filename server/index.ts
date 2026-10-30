@@ -310,6 +310,7 @@ app.post(
       analysis.output = result.output;
       analysis.usage = result.usage;
       analysis.inputSummary.imageCount = result.imageCount;
+      analysis.inputSummary.omittedImageCount = result.omittedImageCount;
     } catch (err) {
       analysis.status = "failed";
       analysis.error = err instanceof Anthropic.APIError ? `Claude API error ${err.status ?? ""}: ${err.message}` : String((err as Error).message ?? err);

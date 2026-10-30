@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Analysis, AnalysisReview, Case, FindingBasis, ReviewVerdict } from "../../../shared/types";
+import { MAX_IMAGES } from "../../../shared/imageBudget";
 import { api } from "../lib/api";
 
 const BASIS_LABEL: Record<FindingBasis, { text: string; cls: string }> = {
@@ -22,7 +23,8 @@ export function AnalysisPanel({ c, onChange }: { c: Case; onChange: () => void }
   const [selectedId, setSelectedId] = useState<string | null>(c.analyses[0]?.id ?? null);
 
   const included = c.records.filter((r) => r.includeInAnalysis);
-  const imageCount = included.reduce((n, r) => n + r.previews.length, 0);
+  const totalImages = included.reduce((n, r) => n + r.previews.length, 0);
+  const imageCount = Math.min(totalImages, MAX_IMAGES);
   const measurementCount = included.reduce((n, r) => n + r.measurements.length, 0);
   const selected = c.analyses.find((a) => a.id === selectedId) ?? c.analyses[0];
 
@@ -50,6 +52,12 @@ export function AnalysisPanel({ c, onChange }: { c: Case; onChange: () => void }
           {included.length} record{included.length === 1 ? "" : "s"} ({measurementCount} measurement{measurementCount === 1 ? "" : "s"}) to Claude.
           Choose which records to include on the Records tab. The case reference is sent; names are never stored here.
         </p>
+        {totalImages > MAX_IMAGES && (
+          <p className="small warn">
+            These records have {totalImages} images, more than the {MAX_IMAGES} per analysis. Every record still sends its first image, and photos and
+            radiographs come before extra scan and CBCT views. Untick records you don't need to keep the rest.
+          </p>
+        )}
         <label>
           <span>Anything specific? (optional)</span>
           <textarea
@@ -106,7 +114,8 @@ function AnalysisView({ caseId, a, onChange }: { caseId: string; a: Analysis; on
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Case summary</h2>
           <span className="small muted">
-            {new Date(a.createdAt).toLocaleString("en-GB")} · {a.inputSummary.imageCount} images · {a.inputSummary.measurementCount} measurements
+            {new Date(a.createdAt).toLocaleString("en-GB")} · {a.inputSummary.imageCount} images
+            {a.inputSummary.omittedImageCount ? ` (${a.inputSummary.omittedImageCount} left out)` : ""} · {a.inputSummary.measurementCount} measurements
           </span>
         </div>
         <p>{o.caseSummary}</p>
