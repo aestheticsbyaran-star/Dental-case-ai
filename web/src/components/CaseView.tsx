@@ -4,8 +4,9 @@ import { api } from "../lib/api";
 import { DetailsForm } from "./DetailsForm";
 import { RecordsPanel } from "./RecordsPanel";
 import { AnalysisPanel } from "./AnalysisPanel";
+import { DocumentsPanel } from "./DocumentsPanel";
 
-type Tab = "details" | "records" | "analysis";
+type Tab = "details" | "records" | "analysis" | "documents";
 
 export function CaseView({ caseId, onClose }: { caseId: string; onClose: () => void }) {
   const [c, setCase] = useState<Case | null>(null);
@@ -53,6 +54,7 @@ export function CaseView({ caseId, onClose }: { caseId: string; onClose: () => v
             ["details", "Details & notes"],
             ["records", `Records (${c.records.length})`],
             ["analysis", `Analysis (${c.analyses.length})`],
+            ["documents", `Documents (${c.documents?.length ?? 0})`],
           ] as [Tab, string][]
         ).map(([key, label]) => (
           <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
@@ -63,7 +65,8 @@ export function CaseView({ caseId, onClose }: { caseId: string; onClose: () => v
 
       {tab === "details" && <DetailsForm c={c} onSaved={setCase} />}
       {tab === "records" && <RecordsPanel c={c} onChange={reload} />}
-      {tab === "analysis" && <AnalysisPanel c={c} onChange={reload} />}
+      {tab === "analysis" && <AnalysisPanel c={c} onChange={reload} onWriteDocuments={() => setTab("documents")} />}
+      {tab === "documents" && <DocumentsPanel c={c} onChange={reload} />}
     </div>
   );
 }

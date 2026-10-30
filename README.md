@@ -40,6 +40,18 @@ Case files are saved in `./data` (change it with `DATA_DIR` in `.env`). Back tha
 5. **Analysis**: optionally ask a specific question, then **Analyse case**. The result shows a case summary, findings by tooth (each marked as coming from your measurements, your notes, or the AI's own visual impression), treatment options with pros and cons, risks, missing information and next steps.
 6. **Review**: record whether you agreed and what you actually planned. **Download review log (CSV)** exports this across all cases, building a record of how the AI compares with your decisions.
 
+7. **Documents**: once you've written your final plan in the review, the Documents tab writes, from the analysis and your plan:
+   - a **treatment plan letter** on your letterhead (type the patient's name when printing; it is never saved)
+   - a **records note** to paste into your practice software
+   - a **treatment plan guide** for the patient to take home
+   - a **patient presentation**: branded slides using the patient's own photos and radiographs, with a script for each slide. **Present** shows them full screen for screen-recording a video (arrow keys to move, N for your script, Esc to finish).
+
+   Add fees or anything to mention in the box before writing. Every document can be edited, printed or saved as a PDF, and copied as text. **Copy analysis as text** on the Analysis tab copies the analysis itself.
+
+## Branding
+
+**Practice settings** (top right) sets the name, qualifications, GDC number, practice details, logo and brand colour used across the app, letters, guides and slides, plus notes on your writing style (you can paste an example letter with patient details removed). These are stored in `data/settings.json` and `data/brand/`.
+
 ## What is sent to Claude
 
 For records ticked **Include in AI analysis**:
@@ -48,6 +60,8 @@ For records ticked **Include in AI analysis**:
 - the case reference, age, sex and the text fields from Details & notes
 - your measurements, with units and calibration source
 - your question
+
+When writing a document, only text is sent: the case details, your measurements, the analysis, your final plan, your instructions, your practice name and writing style, and for presentations the captions of the case images (not the images).
 
 Original DICOM headers, file metadata and the original files themselves are not sent. Keep names, dates of birth and addresses out of the text fields.
 

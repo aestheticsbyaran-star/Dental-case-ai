@@ -1,4 +1,18 @@
-import type { Analysis, AnalysisReview, Case, CaseDetails, CaseRecord, Measurement, RadiographView, RecordKind, VolumeInfo } from "../../../shared/types";
+import type {
+  Analysis,
+  AnalysisReview,
+  BrandSettings,
+  Case,
+  CaseDetails,
+  CaseRecord,
+  DocumentContentMap,
+  DocumentKind,
+  Measurement,
+  PatientDocument,
+  RadiographView,
+  RecordKind,
+  VolumeInfo,
+} from "../../../shared/types";
 
 export interface CaseSummary {
   id: string;
@@ -78,4 +92,20 @@ export const api = {
   analyse: (caseId: string, question: string) => request<Analysis>(`/api/cases/${caseId}/analyses`, json("POST", { question })),
   saveReview: (caseId: string, analysisId: string, review: Partial<AnalysisReview>) =>
     request<Analysis>(`/api/cases/${caseId}/analyses/${analysisId}/review`, json("PUT", review)),
+
+  writeDocument: (caseId: string, body: { kind: DocumentKind; analysisId: string; optionTitle: string; instructions: string }) =>
+    request<PatientDocument>(`/api/cases/${caseId}/documents`, json("POST", body)),
+  saveDocument: (caseId: string, docId: string, content: DocumentContentMap[DocumentKind]) =>
+    request<PatientDocument>(`/api/cases/${caseId}/documents/${docId}`, json("PUT", { content })),
+  deleteDocument: (caseId: string, docId: string) => request<void>(`/api/cases/${caseId}/documents/${docId}`, { method: "DELETE" }),
+
+  getBrand: () => request<BrandSettings>("/api/settings"),
+  saveBrand: (brand: BrandSettings) => request<BrandSettings>("/api/settings", json("PUT", brand)),
+  uploadLogo: (file: File) => {
+    const form = new FormData();
+    form.append("logo", file, file.name);
+    return request<BrandSettings>("/api/settings/logo", { method: "POST", body: form });
+  },
+  deleteLogo: () => request<BrandSettings>("/api/settings/logo", { method: "DELETE" }),
+  logoUrl: (name: string) => `/api/brand/${name}`,
 };

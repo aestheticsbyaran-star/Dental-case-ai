@@ -82,6 +82,8 @@ export interface Case {
   details: CaseDetails;
   records: CaseRecord[];
   analyses: Analysis[];
+  /** Patient-facing documents and record notes written from an analysis. Older cases have none. */
+  documents?: PatientDocument[];
 }
 
 export type FindingBasis = "clinician-measurement" | "clinician-notes" | "visual-impression";
@@ -136,6 +138,110 @@ export interface Analysis {
   usage?: { inputTokens: number; outputTokens: number };
   review: AnalysisReview;
 }
+
+export type DocumentKind = "letter" | "records" | "guide" | "presentation";
+
+export interface LetterContent {
+  subject: string;
+  /** Body paragraphs. The greeting, date and sign-off come from the letterhead. */
+  paragraphs: string[];
+}
+
+export interface RecordsContent {
+  /** Plain text for pasting into the practice's clinical records. */
+  text: string;
+}
+
+export interface GuideSection {
+  heading: string;
+  paragraphs: string[];
+  bullets: string[];
+}
+
+export interface GuideContent {
+  title: string;
+  intro: string;
+  sections: GuideSection[];
+}
+
+export interface Slide {
+  title: string;
+  bullets: string[];
+  /** What the dentist says over this slide while recording. */
+  script: string;
+  /** Index into the case images offered when the deck was written, or null for a text slide. */
+  imageIndex: number | null;
+}
+
+export interface PresentationContent {
+  title: string;
+  slides: Slide[];
+}
+
+export interface DocumentContentMap {
+  letter: LetterContent;
+  records: RecordsContent;
+  guide: GuideContent;
+  presentation: PresentationContent;
+}
+
+/** A preview image a presentation can show: the record and which of its previews. */
+export interface DocumentImage {
+  recordId: string;
+  preview: string;
+  label: string;
+}
+
+export interface PatientDocument<K extends DocumentKind = DocumentKind> {
+  id: string;
+  kind: K;
+  createdAt: string;
+  updatedAt: string;
+  analysisId: string;
+  /** The treatment option the document is about, or empty for the dentist's final plan. */
+  optionTitle: string;
+  instructions: string;
+  model: string;
+  status: "complete" | "failed";
+  content?: DocumentContentMap[K];
+  /** Images offered to Claude for a presentation, in the order imageIndex refers to. */
+  images?: DocumentImage[];
+  error?: string;
+  usage?: { inputTokens: number; outputTokens: number };
+}
+
+/** How the dentist and practice appear on screen, letters and slides. Stored in data/settings.json. */
+export interface BrandSettings {
+  displayName: string;
+  qualifications: string;
+  gdcNumber: string;
+  practiceName: string;
+  address: string;
+  phone: string;
+  email: string;
+  website: string;
+  /** Hex colour used for the header, letterheads and slides. */
+  brandColour: string;
+  signOff: string;
+  /** How documents should sound, and any example letter text to match. Sent to Claude. */
+  writingStyle: string;
+  /** Stored file name of the uploaded logo, if any. */
+  logo?: string;
+}
+
+export const defaultBrand = (): BrandSettings => ({
+  displayName: "Dr Aran Maxwell-Cox",
+  qualifications: "",
+  gdcNumber: "",
+  practiceName: "",
+  address: "",
+  phone: "",
+  email: "",
+  website: "",
+  brandColour: "#1f3b57",
+  signOff: "Kind regards",
+  writingStyle: "",
+});
 
 export const emptyDetails = (): CaseDetails => ({
   reference: "",
